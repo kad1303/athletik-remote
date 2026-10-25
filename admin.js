@@ -1,0 +1,705 @@
+'use strict';
+
+/* ============================================================
+   Trainer-Ansicht (Alex): Spieler, Spieler-Detail, Plan-Editor,
+   Feedback-Eingang, Vorlagen, Inhalte (Videos + Bonus).
+   ============================================================ */
+
+const MAX_UPLOAD_MB = 50;   // Grenze im kostenlosen Supabase-Tarif
+
+const Admin = {
+  route(page) {
+    return {
+      spieler: (v, a, live) => a[0] ? this.player(v, a[0], live) : this.players(v, live),
+      plan: (v, a, live) => this.editor(v, a[0], live),
+      feedback: (v, a, live) => this.feedback(v, live),
+      plaene: (v, a, live) => this.templates(v, live),
+      inhalte: (v, a, live) => this.content(v, a[0] || 'videos', live),
+    }[page];
+  },
+
+  async refreshBadge() {
+    try {
+      const rows = await DB.list('feedback', { coach_seen: false }, { select: 'id' });
+      App.badge = rows.length;
+      const b = $('#fb-badge');
+      if (b) { b.textContent = rows.length; b.hidden = !rows.length; }
+    } catch (e) { console.warn(e); }
+  },
+
+  /* ---------- Spielerliste ---------- */
+  async players(view, live) {
+    const today = Dates.today();
+    const week = Dates.week(today);
+    const [players, plans, invites, logs, unseen] = await Promise.all([
+      DB.list('players', {}, { order: 'name' }),
+      DB.list('plans', { active: true, player_id: { not: 'is.null' } }),
+      DB.list('invites', { used_at: null, role: 'player' }),
+      DB.list('logs', { date: { gte: Dates.add(today, -60) } }, { select: 'player_id,day_id,date,done', order: '-date' }),
+      DB.list('feedback', { coach_seen: false }, { select: 'player_id' }),
+    ]);
+    const days = await DB.list('plan_days', { plan_id: plans.map(p => p.id) }, { select: 'id,plan_id,weekday' });
+    if (!live()) return;
+    const active = players.filter(p => p.active);
+    const archived = players.filter(p => !p.active);
+
+    const card = p => {
+      const plan = plans.find(x => x.player_id === p.id);
+      const pd = plan ? days.filter(d => d.plan_id === plan.id) : [];
+      const planned = pd.filter(d => d.weekday).length;
+      const doneThisWeek = new Set(logs.filter(l => l.player_id === p.id && l.done && l.date >= week[0]).map(l => `${l.day_id}|${l.date}`)).size;
+      const last = logs.find(l => l.player_id === p.id);
+      const fb = unseen.filter(f => f.player_id === p.id).length;
+      const access = p.user_id ? '' : invites.some(i => i.player_id === p.id) ? '<span class="pill warn">Einladung offen</span>' : '<span class="pill">Kein Zugang</span>';
+      return `<a class="card player-card" href="#/spieler/${p.id}">
+        <span class="avatar">${esc(initials(p.name))}</span>
+        <div class="pc-main">
+          <div class="pc-name"><strong>${esc(p.name)}</strong>${fb ? `<span class="pill accent">${fb} neu</span>` : ''}${access}</div>
+          <span class="muted small">${esc(p.sport || '')}${p.sport ? ' · ' : ''}${plan ? esc(plan.title) : '<span class="warn-text">kein aktiver Plan</span>'}</span>
+          <div class="pc-stats">
+            <span class="mini-bar" title="Diese Woche"><i style="width:${planned ? Math.min(100, doneThisWeek / planned * 100) : 0}%"></i></span>
+            <span class="small num">${doneThisWeek}/${planned} diese Woche</span>
+            <span class="small muted">${last ? `zuletzt ${Dates.relative(last.date)}` : 'noch nichts eingetragen'}</span>
+          </div>
+        </div>${icon('next')}</a>`;
+    };
+
+    view.innerHTML = `<div class="page">
+      <header class="page-head"><div><h1>Spieler</h1><p class="muted">${plural(active.length, 'aktiver Spieler', 'aktive Spieler')}</p></div>
+        <button class="btn primary" id="add">${icon('plus')} Spieler</button></header>
+      <div class="player-grid">${active.map(card).join('') || '<section class="card empty"><p class="muted">Noch keine Spieler. Leg den ersten an und schick ihm den Einladungslink per WhatsApp.</p></section>'}</div>
+      ${archived.length ? `<details class="archive"><summary>Archiv (${archived.length})</summary><div class="player-grid">${archived.map(card).join('')}</div></details>` : ''}
+    </div>`;
+    $('#add').onclick = () => this.addPlayer();
+  },
+
+  async addPlayer() {
+    const templates = await DB.list('plans', { player_id: null }, { order: 'title' });
+    const s = openSheet(`<h2>Neuer Spieler</h2>
+      <form class="form" id="np">
+        <label>Name<input name="pname" required autocomplete="off"></label>
+        <label>Sportart<input name="sport" value="Tennis" list="sports"></label>
+        <datalist id="sports"><option>Tennis</option><option>Fußball</option><option>Padel</option><option>Leichtathletik</option></datalist>
+        <label>Notizen (sieht nur der Trainer)<textarea name="notes" rows="2"></textarea></label>
+        ${templates.length ? `<label>Startplan<select name="tpl"><option value="">– leer, mache ich selbst –</option>${templates.map(t => `<option value="${t.id}">${esc(t.title)}</option>`).join('')}</select></label>` : ''}
+        <button class="btn primary block" type="submit">Anlegen & Einladungslink erzeugen</button>
+      </form>`);
+    s.querySelector('#np').onsubmit = async e => {
+      e.preventDefault();
+      const f = e.target.elements;
+      e.target.querySelector("[type=submit]").disabled = true;
+      try {
+        const player = await DB.insert('players', { name: f.pname.value.trim(), sport: f.sport.value.trim(), notes: f.notes.value.trim(), active: true });
+        if (f.tpl && f.tpl.value) await this.copyPlan(f.tpl.value, player.id, { start_date: Dates.monday(Dates.add(Dates.today(), 7)) });
+        const code = newCode();
+        await DB.insert('invites', { code, role: 'player', name: player.name, player_id: player.id });
+        closeSheet();
+        location.hash = `#/spieler/${player.id}`;
+        setTimeout(() => showInvite(player.name, code), 300);
+      } catch (x) { toast(friendlyAuthError(x), 'err'); e.target.querySelector("[type=submit]").disabled = false; }
+    };
+  },
+
+  /* ---------- Spieler-Detail ---------- */
+  async player(view, id, live) {
+    const today = Dates.today();
+    const week = Dates.week(today);
+    const [[p], plans, invites, logs, feedback] = await Promise.all([
+      DB.list('players', { id }),
+      DB.list('plans', { player_id: id }, { order: '-created_at' }),
+      DB.list('invites', { player_id: id, used_at: null }, { order: '-created_at' }),
+      DB.list('logs', { player_id: id, date: { gte: Dates.add(today, -42) } }, { order: '-date' }),
+      DB.list('feedback', { player_id: id }, { order: '-date', limit: 30 }),
+    ]);
+    if (!p) { view.innerHTML = '<div class="page"><p class="err-box">Spieler nicht gefunden.</p></div>'; return; }
+    const plan = plans.find(x => x.active);
+    const days = await DB.list('plan_days', { plan_id: plans.map(x => x.id) }, { order: 'sort' });
+    const exs = plan ? await DB.list('exercises', { day_id: days.filter(d => d.plan_id === plan.id).map(d => d.id) }, { select: 'id,day_id' }) : [];
+    if (!live()) return;
+    const planDays = plan ? days.filter(d => d.plan_id === plan.id) : [];
+    const dayTitle = dId => (days.find(d => d.id === dId) || {}).title;
+
+    const access = p.user_id
+      ? `<p><span class="pill ok">Hat Zugang</span></p><p class="muted small">Passwort vergessen oder neues Handy ohne Login? Zugang zurücksetzen – Trainingsdaten bleiben erhalten, ${esc(p.name.split(' ')[0])} bekommt einen neuen Link.</p>
+         <div class="row-btns"><button class="btn" data-act="reset">Zugang zurücksetzen</button></div>`
+      : invites.length
+        ? `<p><span class="pill warn">Einladung offen</span> <span class="muted small">seit ${Dates.short(invites[0].created_at)}</span></p>
+           <div class="row-btns"><button class="btn primary" data-act="show-invite">${icon('wa')} Link senden</button><button class="btn" data-act="new-invite">Neuer Link</button></div>`
+        : `<p><span class="pill">Kein Zugang</span></p><div class="row-btns"><button class="btn primary" data-act="new-invite">Einladungslink erzeugen</button></div>`;
+
+    // Status je Trainingstag in dieser Woche
+    const st = (d, date) => {
+      const total = exs.filter(e => e.day_id === d.id).length;
+      const done = new Set(logs.filter(l => l.day_id === d.id && l.date === date && l.done).map(l => l.exercise_id)).size;
+      const fb = feedback.some(f => f.day_id === d.id && f.date === date);
+      return fb || (total && done >= total) ? { key: 'done' } : done ? { key: 'partial', done, total } : { key: date < today ? 'missed' : 'open' };
+    };
+
+    // Einheiten = Einträge gruppiert nach Tag + Datum
+    const sessions = {};
+    logs.forEach(l => {
+      const k = `${l.date}|${l.day_id || l.exercise_name}`;
+      (sessions[k] = sessions[k] || { date: l.date, day_id: l.day_id, logs: [] }).logs.push(l);
+    });
+    const sessionList = Object.values(sessions).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
+
+    view.innerHTML = `<div class="page">
+      <header class="page-head sub-head">
+        <a class="icon-btn" href="#/spieler" aria-label="Zurück">${icon('back')}</a>
+        <span class="avatar lg">${esc(initials(p.name))}</span>
+        <div><h1>${esc(p.name)}</h1><p class="muted">${esc(p.sport || '')}${p.active ? '' : ' · archiviert'}</p></div>
+        <button class="icon-btn" data-act="edit" aria-label="Spieler bearbeiten">${icon('edit')}</button>
+      </header>
+      ${p.notes ? `<p class="card note">${richText(p.notes)}</p>` : ''}
+      <div class="cols">
+        <div class="col">
+          <section class="card">
+            <div class="card-head"><h2>Trainingsplan</h2><button class="btn small" data-act="new-plan">${icon('plus')} Neuer Plan</button></div>
+            ${plan ? `<a class="plan-box" href="#/plan/${plan.id}">
+                <div><strong>${esc(plan.title)}</strong><span class="muted small">${plan.start_date ? `ab ${Dates.short(plan.start_date)}` : ''}${plan.weeks ? ` · ${plan.weeks} Wochen` : ''}</span></div>
+                <span class="btn small">${icon('edit')} Bearbeiten</span></a>
+              <ol class="week compact">${week.map(date => {
+                const ds = planDays.filter(d => d.weekday === Dates.weekday(date));
+                return `<li class="${date === today ? 'is-today' : ''}"><span class="wd"><strong>${WD[Dates.weekday(date) - 1]}</strong></span>
+                  <div class="wd-items">${ds.map(d => `<span class="wd-item">${Player.statusIcon(st(d, date))}<span>${esc(d.title)}</span></span>`).join('') || '<span class="muted small">frei</span>'}</div></li>`;
+              }).join('')}</ol>
+              ${planDays.some(d => !d.weekday) ? `<p class="muted small">Flexibel: ${planDays.filter(d => !d.weekday).map(d => esc(d.title)).join(', ')}</p>` : ''}`
+            : '<p class="muted">Noch kein aktiver Plan.</p>'}
+            ${plans.filter(x => !x.active).length ? `<details class="older"><summary>Frühere Pläne (${plans.filter(x => !x.active).length})</summary>
+              ${plans.filter(x => !x.active).map(x => `<div class="older-row"><a href="#/plan/${x.id}">${esc(x.title)}</a><span class="muted small">${Dates.short(x.created_at)}</span><button class="btn small" data-act="activate" data-id="${x.id}">Aktivieren</button></div>`).join('')}
+            </details>` : ''}
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>Zugang</h2></div>
+            ${access}
+          </section>
+        </div>
+        <div class="col">
+          <section class="card">
+            <h2>Feedback</h2>
+            ${feedback.length ? `<ul class="fb-list">${feedback.map(f => this.fbItem(f)).join('')}</ul>` : '<p class="muted">Noch kein Feedback.</p>'}
+          </section>
+          <section class="card">
+            <h2>Letzte Einheiten</h2>
+            ${sessionList.length ? `<div class="sessions">${sessionList.map(s => `<details class="session">
+              <summary><span class="num">${Dates.short(s.date)}</span><strong>${esc(dayTitle(s.day_id) || 'Training')}</strong>
+                <span class="muted small">${s.logs.filter(l => l.done).length}/${s.logs.length} erledigt</span></summary>
+              <table class="log-table">${s.logs.map(l => `<tr><td>${l.done ? icon('check', 'ok') : ''}</td><td>${esc(l.exercise_name)}</td><td class="num">${esc(setsText(l.sets)) || '–'}</td></tr>`).join('')}</table>
+            </details>`).join('')}</div>` : '<p class="muted">In den letzten 6 Wochen nichts eingetragen.</p>'}
+          </section>
+        </div>
+      </div>
+    </div>`;
+
+    this.bindFeedback(view, () => this.refreshBadge());
+    view.onclick = async e => {
+      const b = e.target.closest('[data-act]');
+      if (!b) return;
+      const act = b.dataset.act;
+      try {
+        if (act === 'edit') this.editPlayer(p);
+        if (act === 'new-plan') this.newPlan(p, plans);
+        if (act === 'show-invite') showInvite(p.name, invites[0].code);
+        if (act === 'new-invite') {
+          await DB.remove('invites', { player_id: p.id, used_at: null });
+          const code = newCode();
+          await DB.insert('invites', { code, role: 'player', name: p.name, player_id: p.id });
+          await route();
+          showInvite(p.name, code);
+        }
+        if (act === 'reset') {
+          if (!(await confirmSheet(`Zugang von ${p.name} zurücksetzen? Das alte Login funktioniert danach nicht mehr.`, 'Zurücksetzen'))) return;
+          await DB.rpc('reset_access', { p_player: p.id });
+          const code = newCode();
+          await DB.insert('invites', { code, role: 'player', name: p.name, player_id: p.id });
+          await route();
+          showInvite(p.name, code, `Hi ${p.name.split(' ')[0]}! Hier ist dein neuer Zugang zu Athletik Remote:`);
+        }
+        if (act === 'activate') {
+          for (const x of plans.filter(x => x.active)) await DB.update('plans', x.id, { active: false });
+          await DB.update('plans', b.dataset.id, { active: true });
+          toast('Plan ist jetzt aktiv');
+          route();
+        }
+      } catch (x) { toast(friendlyAuthError(x), 'err'); }
+    };
+  },
+
+  editPlayer(p) {
+    const s = openSheet(`<h2>${esc(p.name)} bearbeiten</h2>
+      <form class="form" id="ep">
+        <label>Name<input name="pname" value="${esc(p.name)}" required></label>
+        <label>Sportart<input name="sport" value="${esc(p.sport || '')}"></label>
+        <label>Notizen (sieht nur der Trainer)<textarea name="notes" rows="3">${esc(p.notes || '')}</textarea></label>
+        <label class="check-line"><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Aktiv (sonst im Archiv)</label>
+        <button class="btn primary block" type="submit">Speichern</button>
+      </form>
+      <button class="btn danger ghost block" id="del">${icon('trash')} Spieler endgültig löschen</button>`);
+    s.querySelector('#ep').onsubmit = async e => {
+      e.preventDefault();
+      const f = e.target.elements;
+      await DB.update('players', p.id, { name: f.pname.value.trim(), sport: f.sport.value.trim(), notes: f.notes.value.trim(), active: f.active.checked });
+      closeSheet();
+      route();
+    };
+    s.querySelector('#del').onclick = async () => {
+      if (!(await confirmSheet(`${p.name} mit allen Plänen, Einträgen und Feedback löschen? Das lässt sich nicht rückgängig machen.`))) return;
+      if (p.user_id) await DB.rpc('reset_access', { p_player: p.id });
+      await DB.remove('players', { id: p.id });
+      toast('Gelöscht');
+      location.hash = '#/spieler';
+    };
+  },
+
+  async newPlan(p, plans) {
+    const [templates, others] = await Promise.all([
+      DB.list('plans', { player_id: null }, { order: 'title' }),
+      DB.list('plans', { active: true, player_id: { not: 'is.null' } }, { order: 'title' }),
+    ]);
+    const players = await DB.list('players', { id: others.map(o => o.player_id) }, { select: 'id,name' });
+    const nameOf = id => (players.find(x => x.id === id) || {}).name || '';
+    const sources = [
+      ...templates.map(t => [t.id, `Vorlage: ${t.title}`]),
+      ...others.filter(o => o.player_id !== p.id).map(o => [o.id, `${nameOf(o.player_id)}: ${o.title}`]),
+      ...plans.map(o => [o.id, `Bisher: ${o.title}`]),
+    ];
+    const s = openSheet(`<h2>Neuer Plan für ${esc(p.name)}</h2>
+      <form class="form" id="npf">
+        <label>Name des Plans<input name="title" placeholder="z. B. Wintervorbereitung Block 2" required></label>
+        <label>Start (Montag)<input name="start" type="date" value="${Dates.monday(Dates.add(Dates.today(), 7))}"></label>
+        <label>Dauer in Wochen<input name="weeks" type="number" min="1" max="52" value="6"></label>
+        <label>Grundlage<select name="src"><option value="">Leerer Plan</option>${sources.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></label>
+        <p class="muted small">Der neue Plan wird sofort aktiv, der bisherige wandert zu „Frühere Pläne“ (Einträge bleiben erhalten).</p>
+        <button class="btn primary block" type="submit">Plan anlegen</button>
+      </form>`);
+    s.querySelector('#npf').onsubmit = async e => {
+      e.preventDefault();
+      const f = e.target.elements;
+      e.target.querySelector("[type=submit]").disabled = true;
+      try {
+        const over = { title: f.title.value.trim(), start_date: f.start.value || null, weeks: +f.weeks.value || null };
+        for (const x of plans.filter(x => x.active)) await DB.update('plans', x.id, { active: false });
+        const plan = f.src.value ? await this.copyPlan(f.src.value, p.id, over) : await DB.insert('plans', { player_id: p.id, active: true, notes: '', ...over });
+        closeSheet();
+        location.hash = `#/plan/${plan.id}`;
+      } catch (x) { toast(friendlyAuthError(x), 'err'); e.target.querySelector("[type=submit]").disabled = false; }
+    };
+  },
+
+  // Plan mit allen Tagen und Übungen kopieren (playerId null = als Vorlage)
+  async copyPlan(srcId, playerId, over = {}) {
+    const [src] = await DB.list('plans', { id: srcId });
+    const days = await DB.list('plan_days', { plan_id: srcId }, { order: 'sort' });
+    const exs = await DB.list('exercises', { day_id: days.map(d => d.id) }, { order: 'sort' });
+    const plan = await DB.insert('plans', {
+      id: uuid(), player_id: playerId, title: src.title, notes: src.notes || '', weeks: src.weeks,
+      start_date: playerId ? src.start_date : null, active: true, ...over,
+    });
+    const map = {};
+    const newDays = days.map(d => { map[d.id] = uuid(); return { id: map[d.id], plan_id: plan.id, weekday: d.weekday, title: d.title, notes: d.notes || '', sort: d.sort }; });
+    if (newDays.length) await DB.insert('plan_days', newDays);
+    const newExs = exs.map(e => ({ id: uuid(), day_id: map[e.day_id], sort: e.sort, name: e.name, sets: e.sets, reps: e.reps || '', load: e.load || '', rest: e.rest || '', notes: e.notes || '', video_url: e.video_url || '' }));
+    if (newExs.length) await DB.insert('exercises', newExs);
+    return plan;
+  },
+
+  /* ---------- Feedback ---------- */
+  fbItem(f, name) {
+    const hot = f.rpe >= 9 ? 'hot' : f.rpe >= 7 ? 'warm' : '';
+    return `<li class="${f.coach_seen ? '' : 'new'}" data-fb="${f.id}">
+      <div class="fb-meta">${name ? `<a href="#/spieler/${f.player_id}"><strong>${esc(name)}</strong></a> · ` : ''}<strong>${esc(f.day_title || 'Training')}</strong>
+        <span class="muted small">${Dates.short(f.date)}</span>${f.rpe ? `<span class="pill ${hot}" title="${RPE[f.rpe]}">RPE ${f.rpe}</span>` : ''}${f.coach_seen ? '' : '<span class="pill accent">neu</span>'}</div>
+      ${f.text ? `<p>${richText(f.text)}</p>` : ''}
+      <div class="slot"></div>
+      <form class="reply-form"><textarea rows="${f.reply ? 2 : 1}" placeholder="Antwort an ${esc((name || 'Spieler').split(' ')[0])} …">${esc(f.reply || '')}</textarea>
+        <div class="row-btns"><button class="btn small primary" type="submit">${f.reply ? 'Antwort ändern' : 'Antworten'}</button>${f.coach_seen ? '' : '<button class="btn small" type="button" data-seen>Gelesen</button>'}</div></form>
+    </li>`;
+  },
+
+  bindFeedback(root, after) {
+    $$('[data-fb]', root).forEach(li => {
+      const id = li.dataset.fb;
+      const form = li.querySelector('.reply-form');
+      const ta = form.querySelector('textarea');
+      ta.addEventListener('focus', () => { ta.rows = 3; });
+      form.onsubmit = async e => {
+        e.preventDefault();
+        if (!ta.value.trim()) return;
+        try {
+          await DB.update('feedback', id, { reply: ta.value.trim(), coach_seen: true });
+          li.classList.remove('new');
+          li.querySelector('.pill.accent')?.remove();
+          li.querySelector('[data-seen]')?.remove();
+          form.querySelector('[type=submit]').textContent = 'Antwort ändern';
+          toast('Antwort gesendet');
+          after && after();
+        } catch (x) { toast(friendlyAuthError(x), 'err'); }
+      };
+      const seen = form.querySelector('[data-seen]');
+      if (seen) seen.onclick = async () => {
+        await DB.update('feedback', id, { coach_seen: true });
+        li.classList.remove('new');
+        li.querySelector('.pill.accent')?.remove();
+        seen.remove();
+        after && after();
+      };
+    });
+  },
+
+  async feedback(view, live) {
+    const [list, players] = await Promise.all([
+      DB.list('feedback', {}, { order: 'coach_seen,-updated_at', limit: 100 }),
+      DB.list('players', {}, { select: 'id,name' }),
+    ]);
+    const logs = list.length ? await DB.list('logs', { player_id: [...new Set(list.map(f => f.player_id))], date: [...new Set(list.map(f => f.date))] }) : [];
+    if (!live()) return;
+    const name = id => (players.find(p => p.id === id) || {}).name || '?';
+    const fresh = list.filter(f => !f.coach_seen);
+    view.innerHTML = `<div class="page narrow">
+      <header class="page-head"><div><h1>Feedback</h1><p class="muted">${fresh.length ? `${fresh.length} neu` : 'Alles gelesen'}</p></div></header>
+      ${list.length ? `<ul class="fb-list cards">${list.map(f => this.fbItem(f, name(f.player_id))).join('')}</ul>` : '<section class="card empty"><p class="muted">Noch kein Feedback von Spielern.</p></section>'}
+    </div>`;
+    // Eingetragene Gewichte direkt beim Feedback anzeigen
+    list.forEach(f => {
+      const ls = logs.filter(l => l.player_id === f.player_id && l.date === f.date && l.day_id === f.day_id);
+      const slot = $(`[data-fb="${f.id}"] .slot`, view);
+      if (slot && ls.length) slot.innerHTML = `<details class="session"><summary class="small">Eingetragene Werte (${ls.filter(l => l.done).length}/${ls.length} erledigt)</summary>
+        <table class="log-table">${ls.map(l => `<tr><td>${l.done ? icon('check', 'ok') : ''}</td><td>${esc(l.exercise_name)}</td><td class="num">${esc(setsText(l.sets)) || '–'}</td></tr>`).join('')}</table></details>`;
+    });
+    this.bindFeedback(view, () => this.refreshBadge());
+  },
+
+  /* ---------- Vorlagen ---------- */
+  async templates(view, live) {
+    const tpls = await DB.list('plans', { player_id: null }, { order: 'title' });
+    const days = await DB.list('plan_days', { plan_id: tpls.map(t => t.id) }, { select: 'id,plan_id,title,weekday' });
+    if (!live()) return;
+    view.innerHTML = `<div class="page narrow">
+      <header class="page-head"><div><h1>Vorlagen</h1><p class="muted">Pläne zum Wiederverwenden – beim Anlegen eines Spielers oder Plans auswählbar.</p></div>
+        <button class="btn primary" id="nt">${icon('plus')} Vorlage</button></header>
+      ${tpls.map(t => {
+        const ds = days.filter(d => d.plan_id === t.id);
+        return `<a class="card plan-box" href="#/plan/${t.id}"><div><strong>${esc(t.title)}</strong>
+          <span class="muted small">${ds.map(d => `${d.weekday ? WD[d.weekday - 1] + ' ' : ''}${esc(d.title)}`).join(' · ') || 'leer'}</span></div>${icon('next')}</a>`;
+      }).join('') || '<section class="card empty"><p class="muted">Noch keine Vorlagen. Tipp: Im Plan eines Spielers „Als Vorlage speichern“ wählen.</p></section>'}
+    </div>`;
+    $('#nt').onclick = async () => {
+      const plan = await DB.insert('plans', { player_id: null, title: 'Neue Vorlage', notes: '', weeks: 6, active: true });
+      location.hash = `#/plan/${plan.id}`;
+    };
+  },
+
+  /* ---------- Plan-Editor ---------- */
+  async editor(view, id, live) {
+    const [[plan]] = await Promise.all([DB.list('plans', { id })]);
+    if (!plan) { view.innerHTML = '<div class="page"><p class="err-box">Plan nicht gefunden.</p></div>'; return; }
+    const [days, player, library] = await Promise.all([
+      DB.list('plan_days', { plan_id: id }, { order: 'sort' }),
+      plan.player_id ? DB.list('players', { id: plan.player_id }).then(r => r[0]) : null,
+      DB.list('content', { section: 'videos' }, { order: 'category,title' }),
+    ]);
+    const exs = await DB.list('exercises', { day_id: days.map(d => d.id) }, { order: 'sort' });
+    if (!live()) return;
+
+    const S = {
+      plan: { ...plan },
+      days: days.map(d => ({ ...d, exs: exs.filter(e => e.day_id === d.id).map(e => ({ ...e })) })),
+    };
+    const orig = { days: days.map(d => d.id), exs: exs.map(e => e.id) };
+    let dirty = false;
+    const setDirty = v => { dirty = v; view.classList.toggle('dirty', v); $('#save', view) && ($('#save', view).disabled = !v); };
+    window.onbeforeunload = () => (dirty ? true : undefined);
+    const back = player ? `#/spieler/${player.id}` : '#/plaene';
+    const blankEx = () => ({ id: uuid(), name: '', sets: 3, reps: '', load: '', rest: '', notes: '', video_url: '' });
+
+    const exRow = (e, di, ei, n) => `<div class="ed-ex" data-d="${di}" data-e="${ei}">
+      <div class="ed-ex-main">
+        <span class="ex-num">${ei + 1}</span>
+        <input class="ed-name" data-f="name" value="${esc(e.name)}" placeholder="Übung, z. B. Kniebeuge">
+        <div class="ed-move">
+          <button class="icon-btn sm" data-act="ex-up" ${ei ? '' : 'disabled'} aria-label="Nach oben">${icon('up')}</button>
+          <button class="icon-btn sm" data-act="ex-down" ${ei < n - 1 ? '' : 'disabled'} aria-label="Nach unten">${icon('down')}</button>
+          <button class="icon-btn sm" data-act="ex-del" aria-label="Übung löschen">${icon('trash')}</button>
+        </div>
+      </div>
+      <div class="ed-grid">
+        <label>Sätze<input data-f="sets" type="number" min="1" max="20" value="${esc(e.sets)}"></label>
+        <label>Wdh<input data-f="reps" value="${esc(e.reps || '')}" placeholder="8"></label>
+        <label>Gewicht / Intensität<input data-f="load" value="${esc(e.load || '')}" placeholder="60 kg"></label>
+        <label>Pause<input data-f="rest" value="${esc(e.rest || '')}" placeholder="90 s"></label>
+      </div>
+      <input data-f="notes" value="${esc(e.notes || '')}" placeholder="Hinweis zur Ausführung (optional)">
+      <div class="ed-video">
+        ${icon('play')}<input data-f="video_url" value="${esc(e.video_url || '')}" placeholder="Video-Link (YouTube, Vimeo …)">
+        <button class="btn small" data-act="ex-video">Mediathek</button>
+      </div>
+    </div>`;
+
+    const render = () => {
+      const scroll = window.scrollY;
+      view.innerHTML = `<div class="page narrow editor">
+        <header class="page-head sub-head">
+          <a class="icon-btn" href="${back}" aria-label="Zurück">${icon('back')}</a>
+          <div><span class="eyebrow">${player ? `Plan für ${esc(player.name)}` : 'Vorlage'}</span><h1>${esc(S.plan.title || 'Plan')}</h1></div>
+          <button class="btn ghost" data-act="more" aria-label="Weitere Aktionen">⋯</button>
+        </header>
+        <section class="card form">
+          <label>Name des Plans<input data-p="title" value="${esc(S.plan.title)}"></label>
+          ${player ? `<div class="two"><label>Start<input data-p="start_date" type="date" value="${esc(S.plan.start_date || '')}"></label>
+            <label>Wochen<input data-p="weeks" type="number" min="1" max="52" value="${esc(S.plan.weeks || '')}"></label></div>` : ''}
+          <label>Hinweise für den Spieler<textarea data-p="notes" rows="2" placeholder="z. B. Aufwärmen, worauf achten, Ziel des Blocks">${esc(S.plan.notes || '')}</textarea></label>
+          ${player ? `<label class="check-line"><input type="checkbox" data-p="active" ${S.plan.active ? 'checked' : ''}> Aktiver Plan (sieht der Spieler)</label>` : ''}
+        </section>
+        ${S.days.map((d, di) => `<section class="card ed-day" data-d="${di}">
+          <div class="ed-day-head">
+            <select data-df="weekday" aria-label="Wochentag">
+              <option value="">Flexibel</option>${WD_LONG.map((w, i) => `<option value="${i + 1}" ${d.weekday === i + 1 ? 'selected' : ''}>${w}</option>`).join('')}
+            </select>
+            <input data-df="title" value="${esc(d.title)}" placeholder="z. B. Kraft Unterkörper" class="ed-day-title">
+            <div class="ed-move">
+              <button class="icon-btn sm" data-act="day-up" ${di ? '' : 'disabled'} aria-label="Tag nach oben">${icon('up')}</button>
+              <button class="icon-btn sm" data-act="day-down" ${di < S.days.length - 1 ? '' : 'disabled'} aria-label="Tag nach unten">${icon('down')}</button>
+              <button class="icon-btn sm" data-act="day-copy" aria-label="Tag duplizieren">${icon('copy')}</button>
+              <button class="icon-btn sm" data-act="day-del" aria-label="Tag löschen">${icon('trash')}</button>
+            </div>
+          </div>
+          <input data-df="notes" value="${esc(d.notes || '')}" placeholder="Hinweis für diesen Tag (optional)">
+          <div class="ed-exs">${d.exs.map((e, ei) => exRow(e, di, ei, d.exs.length)).join('')}</div>
+          <button class="btn small ghost" data-act="ex-add">${icon('plus')} Übung</button>
+        </section>`).join('')}
+        <button class="btn block dashed" data-act="day-add">${icon('plus')} Trainingstag hinzufügen</button>
+        <div class="save-bar"><span class="muted small" id="dirty-text">${dirty ? 'Ungespeicherte Änderungen' : 'Alles gespeichert'}</span>
+          <button class="btn primary" id="save" ${dirty ? '' : 'disabled'}>Speichern</button></div>
+      </div>`;
+      window.scrollTo(0, scroll);
+    };
+
+    const touch = () => { setDirty(true); const t = $('#dirty-text', view); if (t) t.textContent = 'Ungespeicherte Änderungen'; };
+    view.oninput = e => {
+      const t = e.target;
+      if (t.dataset.p) {
+        S.plan[t.dataset.p] = t.type === 'checkbox' ? t.checked : t.type === 'number' ? (t.value ? +t.value : null) : t.value;
+        if (t.dataset.p === 'title') $('h1', view).textContent = t.value || 'Plan';
+      } else if (t.dataset.df) {
+        const d = S.days[+t.closest('[data-d]').dataset.d];
+        d[t.dataset.df] = t.dataset.df === 'weekday' ? (t.value ? +t.value : null) : t.value;
+      } else if (t.dataset.f) {
+        const row = t.closest('[data-e]');
+        const e = S.days[+row.dataset.d].exs[+row.dataset.e];
+        e[t.dataset.f] = t.dataset.f === 'sets' ? (+t.value || 1) : t.value;
+      } else return;
+      touch();
+    };
+    view.onchange = view.oninput;
+
+    const move = (arr, i, dir) => { const j = i + dir; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; };
+    view.onclick = async e => {
+      const b = e.target.closest('[data-act], #save');
+      if (!b) return;
+      if (b.id === 'save') return save();
+      const act = b.dataset.act;
+      const di = +(b.closest('[data-d]')?.dataset.d ?? -1);
+      const ei = +(b.closest('[data-e]')?.dataset.e ?? -1);
+      const day = S.days[di];
+      if (act === 'more') return more();
+      if (act === 'day-add') {
+        const used = new Set(S.days.map(d => d.weekday));
+        const wd = [1, 3, 5, 2, 4, 6, 7].find(w => !used.has(w)) || null;
+        S.days.push({ id: uuid(), weekday: wd, title: '', notes: '', exs: [blankEx()] });
+      }
+      if (act === 'day-del') {
+        if (day.exs.some(x => x.name) && !(await confirmSheet(`Trainingstag „${day.title || 'ohne Namen'}“ mit allen Übungen löschen?`))) return;
+        S.days.splice(di, 1);
+      }
+      if (act === 'day-up') move(S.days, di, -1);
+      if (act === 'day-down') move(S.days, di, 1);
+      if (act === 'day-copy') S.days.splice(di + 1, 0, { ...day, id: uuid(), title: `${day.title} (Kopie)`, exs: day.exs.map(x => ({ ...x, id: uuid() })) });
+      if (act === 'ex-add') { day.exs.push(blankEx()); render(); touch(); $$(`[data-d="${di}"] .ed-name`, view).pop()?.focus(); return; }
+      if (act === 'ex-del') day.exs.splice(ei, 1);
+      if (act === 'ex-up') move(day.exs, ei, -1);
+      if (act === 'ex-down') move(day.exs, ei, 1);
+      if (act === 'ex-video') return pickVideo(day.exs[ei], b.closest('[data-e]'));
+      render();
+      touch();
+    };
+
+    const pickVideo = (ex, row) => {
+      const s = openSheet(`<h2>Video für „${esc(ex.name || 'Übung')}“</h2>
+        ${library.length ? `<div class="pick-list">${library.map(c => `<button class="pick-row" data-url="${esc(c.url || '')}" ${c.url ? '' : 'disabled'}>${icon('play')}<span><strong>${esc(c.title)}</strong><small class="muted">${esc(c.category || '')}</small></span></button>`).join('')}</div>` : '<p class="muted">In der Mediathek (Inhalte → Videos) ist noch nichts.</p>'}
+        <label class="btn block upload-btn">${icon('upload')} Eigenes Video hochladen (max. ${MAX_UPLOAD_MB} MB)<input type="file" accept="video/*" hidden></label>
+        <p class="muted small">Tipp: Längere Videos am besten bei YouTube als „nicht gelistet“ hochladen und den Link einfügen.</p>`);
+      const set = url => { ex.video_url = url; row.querySelector('[data-f="video_url"]').value = url; touch(); closeSheet(); };
+      $$('[data-url]', s).forEach(b => b.onclick = () => set(b.dataset.url));
+      s.querySelector('input[type=file]').onchange = async e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.size > MAX_UPLOAD_MB * 1048576) { toast(`Datei ist größer als ${MAX_UPLOAD_MB} MB – bitte über YouTube (nicht gelistet) teilen.`, 'err'); return; }
+        toast('Lädt hoch …');
+        try { set(await DB.upload(`uebungen/${uuid()}-${safeName(file.name)}`, file)); toast('Hochgeladen'); }
+        catch (x) { toast(friendlyAuthError(x), 'err'); }
+      };
+    };
+
+    const more = () => {
+      const s = openSheet(`<h2>${esc(S.plan.title)}</h2><div class="action-list">
+        <button class="pick-row" data-m="tpl">${icon('copy')}<span><strong>Als Vorlage speichern</strong><small class="muted">Zum Wiederverwenden für andere Spieler</small></span></button>
+        <button class="pick-row" data-m="copy">${icon('users')}<span><strong>Für anderen Spieler kopieren</strong><small class="muted">Wird dort der aktive Plan</small></span></button>
+        <button class="pick-row danger" data-m="del">${icon('trash')}<span><strong>Plan löschen</strong><small class="muted">Eingetragene Gewichte bleiben im Verlauf</small></span></button>
+      </div>`);
+      $$('[data-m]', s).forEach(b => b.onclick = async () => {
+        if (dirty) { toast('Bitte zuerst speichern.'); return; }
+        const m = b.dataset.m;
+        if (m === 'tpl') {
+          const t = await this.copyPlan(plan.id, null, { title: S.plan.title, start_date: null });
+          closeSheet(); toast('Vorlage gespeichert'); location.hash = `#/plan/${t.id}`;
+        }
+        if (m === 'copy') {
+          const players = (await DB.list('players', { active: true }, { order: 'name' })).filter(x => x.id !== plan.player_id);
+          const s2 = openSheet(`<h2>Kopieren für …</h2><div class="pick-list">${players.map(x => `<button class="pick-row" data-p="${x.id}">${icon('user')}<span><strong>${esc(x.name)}</strong></span></button>`).join('') || '<p class="muted">Keine weiteren Spieler.</p>'}</div>`);
+          $$('[data-p]', s2).forEach(pb => pb.onclick = async () => {
+            const target = players.find(x => x.id === pb.dataset.p);
+            for (const x of await DB.list('plans', { player_id: target.id, active: true })) await DB.update('plans', x.id, { active: false });
+            const np = await this.copyPlan(plan.id, target.id, { title: S.plan.title, start_date: Dates.monday(Dates.add(Dates.today(), 7)), active: true });
+            closeSheet(); toast(`Plan für ${target.name} angelegt`); location.hash = `#/plan/${np.id}`;
+          });
+        }
+        if (m === 'del') {
+          if (!(await confirmSheet(`Plan „${S.plan.title}“ löschen?`))) return;
+          await DB.remove('plans', { id: plan.id });
+          toast('Plan gelöscht');
+          location.hash = back;
+        }
+      });
+    };
+
+    const save = async () => {
+      const btn = $('#save', view);
+      btn.disabled = true;
+      btn.textContent = 'Speichert …';
+      try {
+        const days = S.days.map((d, i) => ({ ...d, title: d.title.trim() || `Training ${i + 1}`, exs: d.exs.filter(x => x.name.trim()) }));
+        const dayRows = days.map((d, i) => ({ id: d.id, plan_id: plan.id, weekday: d.weekday || null, title: d.title, notes: d.notes || '', sort: i }));
+        const exRows = days.flatMap(d => d.exs.map((x, i) => ({
+          id: x.id, day_id: d.id, sort: i, name: x.name.trim(), sets: +x.sets || 1,
+          reps: (x.reps || '').trim(), load: (x.load || '').trim(), rest: (x.rest || '').trim(), notes: (x.notes || '').trim(), video_url: (x.video_url || '').trim(),
+        })));
+        const goneEx = orig.exs.filter(id => !exRows.some(x => x.id === id));
+        const goneDays = orig.days.filter(id => !dayRows.some(x => x.id === id));
+        if (S.plan.active && plan.player_id) {
+          for (const x of await DB.list('plans', { player_id: plan.player_id, active: true })) if (x.id !== plan.id) await DB.update('plans', x.id, { active: false });
+        }
+        await DB.update('plans', plan.id, {
+          title: S.plan.title.trim() || 'Plan', start_date: S.plan.start_date || null, weeks: S.plan.weeks || null,
+          notes: S.plan.notes || '', active: !!S.plan.active, updated_at: new Date().toISOString(),
+        });
+        if (goneEx.length) await DB.remove('exercises', { id: goneEx });
+        await DB.upsert('plan_days', dayRows, 'id');
+        await DB.upsert('exercises', exRows, 'id');
+        if (goneDays.length) await DB.remove('plan_days', { id: goneDays });
+        orig.days = dayRows.map(d => d.id);
+        orig.exs = exRows.map(x => x.id);
+        S.days = days;
+        setDirty(false);
+        render();
+        toast('Gespeichert – der Spieler sieht den Plan sofort.');
+      } catch (x) {
+        toast(friendlyAuthError(x), 'err');
+        btn.disabled = false;
+        btn.textContent = 'Speichern';
+      }
+    };
+
+    // Beim Verlassen mit ungespeicherten Änderungen nachfragen (wird von route() geprüft)
+    App.guard = { hash: `#/plan/${id}`, ok: () => !dirty || confirm('Änderungen am Plan sind noch nicht gespeichert. Trotzdem verlassen?') };
+
+    if (!S.days.length) S.days.push({ id: uuid(), weekday: 1, title: '', notes: '', exs: [blankEx()] });
+    render();
+  },
+
+  /* ---------- Inhalte: Videos + Bonus ---------- */
+  async content(view, section, live) {
+    const [items, players] = await Promise.all([
+      DB.list('content', { section }, { order: 'category,sort,-created_at' }),
+      DB.list('players', { active: true }, { order: 'name', select: 'id,name' }),
+    ]);
+    if (!live()) return;
+    const nameOf = id => (players.find(p => p.id === id) || {}).name || '?';
+    const tools = c => `<div class="cc-tools">${c.audience && c.audience.length ? `<span class="pill" title="${esc(c.audience.map(nameOf).join(', '))}">${plural(c.audience.length, 'Spieler', 'Spieler')}</span>` : '<span class="pill">alle</span>'}
+      <button class="icon-btn sm" data-edit="${c.id}" aria-label="Bearbeiten">${icon('edit')}</button><button class="icon-btn sm" data-del="${c.id}" aria-label="Löschen">${icon('trash')}</button></div>`;
+    const groups = {};
+    items.forEach(c => (groups[c.category || 'Allgemein'] = groups[c.category || 'Allgemein'] || []).push(c));
+    view.innerHTML = `<div class="page narrow">
+      <header class="page-head"><div><h1>Inhalte</h1><p class="muted">Videos für Technik & Übungen, Bonus für alles Zusätzliche.</p></div>
+        <button class="btn primary" id="add">${icon('plus')} Inhalt</button></header>
+      <div class="seg"><a href="#/inhalte/videos" class="${section === 'videos' ? 'on' : ''}">Videos</a><a href="#/inhalte/bonus" class="${section === 'bonus' ? 'on' : ''}">Bonus</a></div>
+      ${Object.entries(groups).map(([cat, list]) => `<section><h2 class="group-title">${esc(cat)}</h2><div class="content-list">${list.map(c => contentCard(c, tools(c))).join('')}</div></section>`).join('')
+        || '<section class="card empty"><p class="muted">Noch nichts hochgeladen.</p></section>'}
+    </div>`;
+    bindContent(view);
+    $('#add').onclick = () => this.editContent({ section }, items, players);
+    $$('[data-edit]', view).forEach(b => b.onclick = () => this.editContent(items.find(c => c.id === b.dataset.edit), items, players));
+    $$('[data-del]', view).forEach(b => b.onclick = async () => {
+      const c = items.find(x => x.id === b.dataset.del);
+      if (!(await confirmSheet(`„${c.title}“ löschen?`))) return;
+      await DB.remove('content', { id: c.id });
+      if (c.url && c.url.startsWith('file:')) await DB.removeFile(c.url.slice(5));
+      route();
+    });
+  },
+
+  editContent(c, items, players) {
+    const cats = [...new Set(items.map(x => x.category).filter(Boolean))];
+    const aud = c.audience || [];
+    const s = openSheet(`<h2>${c.id ? 'Inhalt bearbeiten' : 'Neuer Inhalt'}</h2>
+      <form class="form" id="cf">
+        <div class="seg small"><label><input type="radio" name="section" value="videos" ${c.section === 'videos' ? 'checked' : ''}> Videos</label><label><input type="radio" name="section" value="bonus" ${c.section === 'bonus' ? 'checked' : ''}> Bonus</label></div>
+        <label>Titel<input name="title" value="${esc(c.title || '')}" required></label>
+        <label>Kategorie<input name="category" value="${esc(c.category || '')}" list="cats" placeholder="z. B. Technik, Aufwärmen, Ernährung"></label>
+        <datalist id="cats">${cats.map(x => `<option>${esc(x)}</option>`).join('')}</datalist>
+        <label>Text (optional)<textarea name="body" rows="4">${esc(c.body || '')}</textarea></label>
+        <label>Link (YouTube, Vimeo, Webseite …)<input name="url" value="${esc(c.url && !c.url.startsWith('file:') ? c.url : '')}" placeholder="https://"></label>
+        <label class="btn block upload-btn">${icon('upload')} <span id="fname">${c.url && c.url.startsWith('file:') ? esc(c.url.split('/').pop().replace(/^[\w-]{36}-/, '')) : `Oder Datei hochladen (Video, PDF, Bild · max. ${MAX_UPLOAD_MB} MB)`}</span><input type="file" name="file" hidden></label>
+        <fieldset class="aud"><legend>Sichtbar für</legend>
+          <label class="check-line"><input type="radio" name="aud" value="all" ${aud.length ? '' : 'checked'}> Alle Spieler</label>
+          <label class="check-line"><input type="radio" name="aud" value="some" ${aud.length ? 'checked' : ''}> Nur bestimmte</label>
+          <div class="aud-list" ${aud.length ? '' : 'hidden'}>${players.map(p => `<label class="check-line"><input type="checkbox" name="who" value="${p.id}" ${aud.includes(p.id) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('')}</div>
+        </fieldset>
+        <button class="btn primary block" type="submit">Speichern</button>
+      </form>`);
+    const f = s.querySelector('#cf');
+    const el = f.elements;
+    let file = null;
+    el.file.onchange = () => {
+      file = el.file.files[0] || null;
+      if (file && file.size > MAX_UPLOAD_MB * 1048576) { toast(`Datei ist größer als ${MAX_UPLOAD_MB} MB – Videos bitte über YouTube (nicht gelistet) teilen.`, 'err'); file = null; el.file.value = ''; return; }
+      if (file) { $('#fname', s).textContent = file.name; el.url.value = ''; if (!el.title.value) el.title.value = file.name.replace(/\.[^.]+$/, ''); }
+    };
+    $$('input[name=aud]', f).forEach(r => r.onchange = () => { $('.aud-list', f).hidden = el.aud.value !== 'some'; });
+    f.onsubmit = async e => {
+      e.preventDefault();
+      e.target.querySelector("[type=submit]").disabled = true;
+      try {
+        let url = el.url.value.trim() || (c.url && c.url.startsWith('file:') ? c.url : '');
+        if (file) {
+          toast('Lädt hoch …');
+          url = await DB.upload(`${el.section.value}/${uuid()}-${safeName(file.name)}`, file);
+          if (c.url && c.url.startsWith('file:')) await DB.removeFile(c.url.slice(5));
+        }
+        const who = $$('input[name=who]:checked', f).map(x => x.value);
+        const row = {
+          section: el.section.value, title: el.title.value.trim(), category: el.category.value.trim() || null,
+          body: el.body.value.trim(), url: url || null, audience: el.aud.value === 'some' && who.length ? who : null,
+        };
+        if (c.id) await DB.update('content', c.id, row);
+        else await DB.insert('content', row);
+        closeSheet();
+        toast('Gespeichert');
+        if (location.hash !== `#/inhalte/${row.section}`) location.hash = `#/inhalte/${row.section}`; else route();
+      } catch (x) { toast(friendlyAuthError(x), 'err'); e.target.querySelector("[type=submit]").disabled = false; }
+    };
+  },
+};
+
+function safeName(name) {
+  return String(name).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w.-]+/g, '-').slice(-60);
+}
