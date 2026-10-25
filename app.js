@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '1';
+const APP_VERSION = '2';
 
 const DEMO = !Auth.configured();
 const DB = DEMO ? Demo.load() : Remote;
@@ -17,7 +17,7 @@ const App = { me: null, badge: 0 };
 
 const TABS = {
   player: [['heute', 'home', 'Heute'], ['videos', 'play', 'Videos'], ['bonus', 'star', 'Bonus'], ['verlauf', 'chart', 'Verlauf'], ['profil', 'user', 'Profil']],
-  admin: [['spieler', 'users', 'Spieler'], ['feedback', 'msg', 'Feedback'], ['plaene', 'list', 'Vorlagen'], ['inhalte', 'folder', 'Inhalte'], ['profil', 'user', 'Profil']],
+  admin: [['spieler', 'users', 'Spieler'], ['feedback', 'msg', 'Feedback'], ['inhalte', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
 };
 
 function inviteUrl(code) { return `${location.origin}${location.pathname}#einladung=${code}`; }
@@ -169,8 +169,8 @@ async function route() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   const admin = App.me.role === 'admin';
   const page = parts[0] || (admin ? 'spieler' : 'heute');
-  const tab = { tag: 'heute', plan: 'spieler' }[page] || page;
-  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === (tab === 'plan' ? 'spieler' : tab)));
+  const tab = { tag: 'heute', plan: 'spieler', pdf: admin ? 'spieler' : 'heute' }[page] || page;
+  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   const view = $('#view');
   const seq = ++routeSeq;
   view.innerHTML = '<div class="spinner"></div>';

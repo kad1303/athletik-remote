@@ -9,7 +9,7 @@ const Player = {
   data: null,   // { player, plan, days, exercises }
 
   route(page) {
-    return { heute: v => this.home(v), tag: (v, a, live) => this.day(v, a, live), videos: v => this.library(v, 'videos'), bonus: v => this.library(v, 'bonus'), verlauf: (v, a, live) => this.history(v, a, live) }[page];
+    return { heute: v => this.home(v), tag: (v, a, live) => this.day(v, a, live), videos: v => this.library(v, 'videos'), bonus: v => this.library(v, 'bonus'), verlauf: (v, a, live) => this.history(v, a, live), pdf: (v, a, live) => this.pdf(v, live) }[page];
   },
 
   pid() { return App.me.player_id; },
@@ -84,6 +84,44 @@ const Player = {
         <span class="go">${st.key === 'done' ? `${icon('check')} Erledigt` : st.key === 'partial' ? 'Weiter' : 'Los geht\'s'} ${icon('next')}</span></a>`;
     };
 
+    const pdfCard = plan.file_url ? `<a class="pdf-card" href="#/pdf">${icon('file')}<span><strong>Dein Trainingsplan</strong><small>Öffnen, abhaken und Gewichte eintragen</small></span><span class="go">Öffnen ${icon('next')}</span></a>` : '';
+
+    // Plan nur als PDF: PDF groß zeigen + einfaches Feedback
+    if (!days.length) {
+      view.innerHTML = `<div class="page narrow">
+        <header class="page-head"><div><h1>Hallo ${esc(first)}</h1><p class="muted">${esc(plan.title)}${weekInfo ? ` · ${weekInfo}` : ''}</p></div></header>
+        ${unread.length ? `<a class="notice" href="#/verlauf">${icon('msg')}<span><strong>Alex hat geantwortet</strong> auf ${unread.length === 1 ? 'dein Feedback' : `${unread.length} Feedbacks`}</span>${icon('next')}</a>` : ''}
+        ${pdfCard || '<section class="card empty"><p class="muted">Alex stellt gerade deinen Plan zusammen.</p></section>'}
+        ${plan.notes ? `<section class="card note"><h2>Hinweise von Alex</h2><p>${richText(plan.notes)}</p></section>` : ''}
+        <section class="card feedback">
+          <h2>Training gemacht?</h2>
+          <p class="muted small">Kurzes Feedback an Alex – wie es lief, Gewichte, Probleme.</p>
+          <input id="fb-title" placeholder="Welche Einheit? z. B. Tag 1 – Kraft">
+          <div class="rpe-label"><span>Anstrengung</span><strong id="rpe-text">bitte wählen</strong></div>
+          <div class="rpe">${Array.from({ length: 10 }, (_, i) => `<button data-rpe="${i + 1}" style="--h:${i}">${i + 1}</button>`).join('')}</div>
+          <textarea id="fb-text" rows="3" placeholder="Wie hat es sich angefühlt? Gewichte, Schmerzen, Fragen …"></textarea>
+          <button class="btn primary block" id="fb-send">Feedback senden</button>
+        </section>
+      </div>`;
+      let rpe = null;
+      $$('[data-rpe]', view).forEach(b => b.onclick = () => {
+        rpe = +b.dataset.rpe;
+        $$('[data-rpe]', view).forEach(x => x.classList.toggle('on', x === b));
+        $('#rpe-text').textContent = `${rpe} – ${RPE[rpe]}`;
+      });
+      $('#fb-send').onclick = async () => {
+        const text = $('#fb-text').value.trim();
+        if (!rpe && !text) { toast('Bitte Anstrengung wählen oder kurz etwas schreiben.'); return; }
+        $('#fb-send').disabled = true;
+        try {
+          await DB.insert('feedback', { player_id: this.pid(), day_id: null, day_title: $('#fb-title').value.trim() || 'Training', date: today, rpe, text });
+          toast('Danke! Feedback ist bei Alex.');
+          route();
+        } catch (x) { toast(friendlyAuthError(x), 'err'); $('#fb-send').disabled = false; }
+      };
+      return;
+    }
+
     view.innerHTML = `<div class="page narrow">
       <header class="page-head"><div><h1>Hallo ${esc(first)}</h1><p class="muted">${esc(plan.title)}${weekInfo ? ` · ${weekInfo}` : ''}</p></div>
         <div class="ring" style="--p:${planned ? Math.min(1, doneCount / planned) : 0}" title="Diese Woche erledigt"><span class="num">${doneCount}/${planned}</span></div></header>
@@ -112,8 +150,43 @@ const Player = {
           return `<a class="wd-item big" href="#/tag/${d.id}/${today}">${times ? `<span class="st done">${icon('check')}</span>` : '<span class="st open"></span>'}<span>${esc(d.title)}<small class="muted">${times ? ` · diese Woche ${times}×` : ''}</small></span>${icon('next')}</a>`;
         }).join('')}</div></section>` : ''}
 
+      ${pdfCard}
       ${plan.notes ? `<section class="card note"><h2>Hinweise von Alex</h2><p>${richText(plan.notes)}</p></section>` : ''}
     </div>`;
+  },
+
+  /* ---------- Plan-PDF ausfüllen ---------- */
+  async pdf(view, live) {
+    const { plan } = await this.load();
+    if (!plan || !plan.file_url) { location.hash = '#/heute'; return; }
+    const fields = await DB.list('pdf_fields', { plan_id: plan.id });
+    const vals = await DB.list('pdf_values', { player_id: this.pid(), field_id: fields.map(f => f.id) });
+    if (!live()) return;
+    view.innerHTML = `<div class="page pdf-page-wrap">
+      <header class="page-head sub-head">
+        <a class="icon-btn" href="#/heute" aria-label="Zurück">${icon('back')}</a>
+        <div><h1>${esc(plan.title)}</h1><p class="muted small">${fields.length ? 'Kästchen antippen zum Abhaken, kg-Felder antippen zum Eintragen.' : 'Dein Trainingsplan'}</p></div>
+        <span class="save-state" id="save-state"></span>
+      </header>
+      <div id="pdf-box" class="pdf-box"></div>
+    </div>`;
+    const saveState = $('#save-state');
+    await PdfView.mount($('#pdf-box'), plan.file_url, {
+      mode: 'fill', fields, values: Object.fromEntries(vals.map(v => [v.field_id, v.value])),
+      onValue: async (f, value) => {
+        saveState.textContent = 'Speichert …';
+        saveState.className = 'save-state';
+        try {
+          await DB.upsert('pdf_values', { field_id: f.id, player_id: this.pid(), value, updated_at: new Date().toISOString() }, 'field_id,player_id');
+          saveState.textContent = 'Gespeichert';
+          saveState.className = 'save-state ok';
+        } catch (x) {
+          saveState.textContent = 'Nicht gespeichert';
+          saveState.className = 'save-state bad';
+          toast(friendlyAuthError(x), 'err');
+        }
+      },
+    });
   },
 
   /* ---------- Trainingstag ---------- */

@@ -128,7 +128,8 @@ const Demo = {
     const ids = gone.map(r => r.id);
     if (ids.length) {
       if (table === 'players') for (const x of ['plans', 'logs', 'feedback', 'invites']) await this.remove(x, { player_id: ids });
-      if (table === 'plans') await this.remove('plan_days', { plan_id: ids });
+      if (table === 'plans') { await this.remove('plan_days', { plan_id: ids }); await this.remove('pdf_fields', { plan_id: ids }); }
+      if (table === 'pdf_fields') await this.remove('pdf_values', { field_id: ids });
       if (table === 'plan_days') await this.remove('exercises', { day_id: ids });
     }
     this.persist();

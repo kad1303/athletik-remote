@@ -389,3 +389,45 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .toast { position: fixed; left: 50%; bottom: calc(var(--tab-h) + env(safe-area-inset-bottom) + 16px); transform: translate(-50%, 20px); z-index: 200; background: var(--ink); color: var(--page); padding: 10px 18px; border-radius: 999px; font-weight: 600; font-size: 0.9rem; opacity: 0; pointer-events: none; transition: all .2s ease; max-width: calc(100% - 32px); text-align: center; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.err { background: var(--bad); color: #fff; border-radius: 14px; }
+
+/* ---------- Plan als PDF ---------- */
+.pdf-card { display: flex; align-items: center; gap: 14px; width: 100%; padding: 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--card); box-shadow: var(--shadow); cursor: pointer; text-align: left; }
+.pdf-card > .ic { width: 32px; height: 32px; color: var(--accent); }
+.pdf-card > span:nth-child(2) { flex: 1; min-width: 0; display: grid; }
+.pdf-card small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-card .go { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 700; white-space: nowrap; }
+.pdf-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--line); }
+.pdf-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pdf-row > .ic { color: var(--accent); }
+
+/* ---------- PDF mit Feldern ---------- */
+.pdf-box { display: grid; gap: 10px; min-height: 0; }
+.pdf-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pdf-toolset button { border: 0; background: none; padding: 7px 14px; border-radius: 999px; font-weight: 600; font-size: 0.88rem; color: var(--ink-2); cursor: pointer; }
+.pdf-toolset button.on { background: var(--ink); color: var(--page); }
+.pdf-sel { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: 999px; background: var(--accent-wash); }
+.pdf-sel .icon-btn { font-weight: 800; font-size: 1.1rem; }
+.pdf-zoom { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+.pdf-zoom .icon-btn { font-weight: 800; font-size: 1.1rem; }
+.pdf-hint { margin-top: -4px; }
+.pdf-scroll { overflow: auto; scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; border-radius: 12px; background: var(--card-2); border: 1px solid var(--line); padding: 1px; }
+.pdf-pages { display: grid; gap: 8px; justify-content: start; }
+.pdf-page { position: relative; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
+.pdf-page canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pdf-layer { position: absolute; inset: 0; }
+.pdf-field {
+  position: absolute; display: grid; place-items: center; overflow: hidden; white-space: nowrap; line-height: 1;
+  border: 1.5px solid rgba(36,86,224,0.75); background: rgba(36,86,224,0.10); border-radius: 3px;
+  color: #0b2a8a; font-weight: 800; font-family: var(--font); cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.pdf-field.filled { background: rgba(36,86,224,0.04); }
+.pdf-field.check.filled { color: #0b2a8a; }
+.pdf-field i { font-style: normal; font-weight: 600; opacity: 0.55; font-size: 0.8em; }
+.pdf-field.sel { border-color: #e0451f; box-shadow: 0 0 0 2px rgba(224,69,31,0.35); }
+.sheet.full { height: 92dvh; grid-template-rows: auto 1fr; overflow: hidden; }
+.sheet.full .pdf-box { grid-template-rows: auto auto 1fr; overflow: hidden; }
+.sheet.full .pdf-field { touch-action: none; }
+.pdf-page-wrap .pdf-scroll { max-height: none; }
+.pv-row { display: flex; align-items: center; gap: 10px; }
+.pv-row input { font-size: 1.6rem; font-weight: 800; text-align: center; padding: 14px; }
+.pv-row span { font-size: 1.2rem; font-weight: 700; color: var(--muted); }

@@ -12,6 +12,7 @@ const Admin = {
     return {
       spieler: (v, a, live) => a[0] ? this.player(v, a[0], live) : this.players(v, live),
       plan: (v, a, live) => this.editor(v, a[0], live),
+      pdf: (v, a, live) => this.pdfFilled(v, a[0], live),
       feedback: (v, a, live) => this.feedback(v, live),
       plaene: (v, a, live) => this.templates(v, live),
       inhalte: (v, a, live) => this.content(v, a[0] || 'videos', live),
@@ -156,8 +157,9 @@ const Admin = {
           <section class="card">
             <div class="card-head"><h2>Trainingsplan</h2><button class="btn small" data-act="new-plan">${icon('plus')} Neuer Plan</button></div>
             ${plan ? `<a class="plan-box" href="#/plan/${plan.id}">
-                <div><strong>${esc(plan.title)}</strong><span class="muted small">${plan.start_date ? `ab ${Dates.short(plan.start_date)}` : ''}${plan.weeks ? ` · ${plan.weeks} Wochen` : ''}</span></div>
+                <div><strong>${esc(plan.title)}${plan.file_url ? ' <span class="pill">PDF</span>' : ''}</strong><span class="muted small">${plan.start_date ? `ab ${Dates.short(plan.start_date)}` : ''}${plan.weeks ? ` · ${plan.weeks} Wochen` : ''}</span></div>
                 <span class="btn small">${icon('edit')} Bearbeiten</span></a>
+              ${plan.file_url ? `<a class="btn block" href="#/pdf/${plan.id}">${icon('file')} Ausgefüllte PDF ansehen</a>` : ''}
               <ol class="week compact">${week.map(date => {
                 const ds = planDays.filter(d => d.weekday === Dates.weekday(date));
                 return `<li class="${date === today ? 'is-today' : ''}"><span class="wd"><strong>${WD[Dates.weekday(date) - 1]}</strong></span>
@@ -269,15 +271,28 @@ const Admin = {
         <label>Start (Montag)<input name="start" type="date" value="${Dates.monday(Dates.add(Dates.today(), 7))}"></label>
         <label>Dauer in Wochen<input name="weeks" type="number" min="1" max="52" value="6"></label>
         <label>Grundlage<select name="src"><option value="">Leerer Plan</option>${sources.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></label>
-        <p class="muted small">Der neue Plan wird sofort aktiv, der bisherige wandert zu „Frühere Pläne“ (Einträge bleiben erhalten).</p>
+        <label class="btn block upload-btn">${icon('file')} <span class="fname">Plan als PDF hochladen (optional)</span><input type="file" name="pdf" accept="application/pdf,.pdf" hidden></label>
+        <p class="muted small">Der neue Plan wird sofort aktiv, der bisherige wandert zu „Frühere Pläne“ (Einträge bleiben erhalten). Mit PDF kannst du die Übungen auch weglassen – dann sieht der Spieler nur das PDF.</p>
         <button class="btn primary block" type="submit">Plan anlegen</button>
       </form>`);
+    const pdfInput = s.querySelector('input[name=pdf]');
+    pdfInput.onchange = () => {
+      const file = pdfInput.files[0];
+      if (file && !checkPdf(file)) { pdfInput.value = ''; return; }
+      s.querySelector('.fname').textContent = file ? file.name : 'Plan als PDF hochladen (optional)';
+      const t = s.querySelector('input[name=title]');
+      if (file && !t.value) t.value = file.name.replace(/\.pdf$/i, '');
+    };
     s.querySelector('#npf').onsubmit = async e => {
       e.preventDefault();
       const f = e.target.elements;
       e.target.querySelector("[type=submit]").disabled = true;
       try {
         const over = { title: f.title.value.trim(), start_date: f.start.value || null, weeks: +f.weeks.value || null };
+        if (pdfInput.files[0]) {
+          toast('PDF wird hochgeladen …');
+          over.file_url = await DB.upload(`plaene/${uuid()}-${safeName(pdfInput.files[0].name)}`, pdfInput.files[0]);
+        }
         for (const x of plans.filter(x => x.active)) await DB.update('plans', x.id, { active: false });
         const plan = f.src.value ? await this.copyPlan(f.src.value, p.id, over) : await DB.insert('plans', { player_id: p.id, active: true, notes: '', ...over });
         closeSheet();
@@ -292,7 +307,7 @@ const Admin = {
     const days = await DB.list('plan_days', { plan_id: srcId }, { order: 'sort' });
     const exs = await DB.list('exercises', { day_id: days.map(d => d.id) }, { order: 'sort' });
     const plan = await DB.insert('plans', {
-      id: uuid(), player_id: playerId, title: src.title, notes: src.notes || '', weeks: src.weeks,
+      id: uuid(), player_id: playerId, title: src.title, notes: src.notes || '', weeks: src.weeks, file_url: src.file_url || null,
       start_date: playerId ? src.start_date : null, active: true, ...over,
     });
     const map = {};
@@ -300,6 +315,8 @@ const Admin = {
     if (newDays.length) await DB.insert('plan_days', newDays);
     const newExs = exs.map(e => ({ id: uuid(), day_id: map[e.day_id], sort: e.sort, name: e.name, sets: e.sets, reps: e.reps || '', load: e.load || '', rest: e.rest || '', notes: e.notes || '', video_url: e.video_url || '' }));
     if (newExs.length) await DB.insert('exercises', newExs);
+    const fields = src.file_url ? await DB.list('pdf_fields', { plan_id: srcId }) : [];
+    if (fields.length) await DB.insert('pdf_fields', fields.map(f => ({ id: uuid(), plan_id: plan.id, page: f.page, kind: f.kind, x: f.x, y: f.y, w: f.w, h: f.h })));
     return plan;
   },
 
@@ -389,6 +406,26 @@ const Admin = {
     };
   },
 
+  /* ---------- Ausgefüllte Plan-PDF eines Spielers ---------- */
+  async pdfFilled(view, id, live) {
+    const [plan] = await DB.list('plans', { id });
+    if (!plan || !plan.file_url) { view.innerHTML = '<div class="page"><p class="err-box">Zu diesem Plan gibt es keine PDF.</p></div>'; return; }
+    const [[player], fields] = await Promise.all([DB.list('players', { id: plan.player_id }), DB.list('pdf_fields', { plan_id: id })]);
+    const vals = await DB.list('pdf_values', { player_id: plan.player_id, field_id: fields.map(f => f.id) }, { order: '-updated_at' });
+    if (!live()) return;
+    const filled = vals.filter(v => v.value).length;
+    view.innerHTML = `<div class="page pdf-page-wrap">
+      <header class="page-head sub-head">
+        <a class="icon-btn" href="#/spieler/${plan.player_id}" aria-label="Zurück">${icon('back')}</a>
+        <div><span class="eyebrow">${esc(player?.name || '')}</span><h1>${esc(plan.title)}</h1>
+          <p class="muted small">${fields.length ? `${filled} von ${plural(fields.length, 'Feld', 'Feldern')} ausgefüllt${vals[0] ? ` · zuletzt ${Dates.relative(vals[0].updated_at.slice(0, 10))}` : ''}` : 'Noch keine Felder gesetzt.'}</p></div>
+        <a class="btn small" href="#/plan/${id}">${icon('edit')} Felder</a>
+      </header>
+      <div id="pdf-box" class="pdf-box"></div>
+    </div>`;
+    await PdfView.mount($('#pdf-box'), plan.file_url, { mode: 'view', fields, values: Object.fromEntries(vals.map(v => [v.field_id, v.value])) });
+  },
+
   /* ---------- Plan-Editor ---------- */
   async editor(view, id, live) {
     const [[plan]] = await Promise.all([DB.list('plans', { id })]);
@@ -399,6 +436,7 @@ const Admin = {
       DB.list('content', { section: 'videos' }, { order: 'category,title' }),
     ]);
     const exs = await DB.list('exercises', { day_id: days.map(d => d.id) }, { order: 'sort' });
+    let fieldCount = plan.file_url ? (await DB.list('pdf_fields', { plan_id: id }, { select: 'id' })).length : 0;
     if (!live()) return;
 
     const S = {
@@ -409,7 +447,7 @@ const Admin = {
     let dirty = false;
     const setDirty = v => { dirty = v; view.classList.toggle('dirty', v); $('#save', view) && ($('#save', view).disabled = !v); };
     window.onbeforeunload = () => (dirty ? true : undefined);
-    const back = player ? `#/spieler/${player.id}` : '#/plaene';
+    const back = player ? `#/spieler/${player.id}` : '#/spieler';
     const blankEx = () => ({ id: uuid(), name: '', sets: 3, reps: '', load: '', rest: '', notes: '', video_url: '' });
 
     const exRow = (e, di, ei, n) => `<div class="ed-ex" data-d="${di}" data-e="${ei}">
@@ -450,6 +488,16 @@ const Admin = {
           <label>Hinweise für den Spieler<textarea data-p="notes" rows="2" placeholder="z. B. Aufwärmen, worauf achten, Ziel des Blocks">${esc(S.plan.notes || '')}</textarea></label>
           ${player ? `<label class="check-line"><input type="checkbox" data-p="active" ${S.plan.active ? 'checked' : ''}> Aktiver Plan (sieht der Spieler)</label>` : ''}
         </section>
+        <section class="card">
+          <div class="card-head"><h2>Plan als PDF</h2></div>
+          ${S.plan.file_url ? `<div class="pdf-row">${icon('file')}<span>${esc(fileLabel(S.plan.file_url))}</span>
+              <button class="icon-btn sm" data-act="pdf-del" aria-label="PDF entfernen">${icon('trash')}</button></div>
+            <button class="btn primary block" data-act="pdf-fields">${icon('edit')} Felder zum Ausfüllen setzen${fieldCount ? ` (${fieldCount})` : ''}</button>
+            <p class="muted small">${fieldCount ? `${plural(fieldCount, 'Feld', 'Felder')} auf der PDF – der Spieler kann sie abhaken bzw. Gewichte eintragen.` : 'Setz Kreuz- und kg-Felder auf die PDF, damit der Spieler sie ausfüllen kann.'}</p>`
+            : '<p class="muted small">Optional: Lade deinen fertigen Plan als PDF hoch. Danach setzt du Felder darauf, in die der Spieler Kreuze und Gewichte einträgt.</p>'}
+          <label class="btn block upload-btn">${icon('upload')} ${S.plan.file_url ? 'Anderes PDF hochladen' : 'PDF hochladen'}<input type="file" id="pdf-up" accept="application/pdf,.pdf" hidden></label>
+        </section>
+        ${!S.days.length ? `<p class="muted small center">Keine Trainingstage – der Spieler sieht nur das PDF. Mit Trainingstagen kann er zusätzlich Gewichte eintragen und abhaken.</p>` : ''}
         ${S.days.map((d, di) => `<section class="card ed-day" data-d="${di}">
           <div class="ed-day-head">
             <select data-df="weekday" aria-label="Wochentag">
@@ -472,6 +520,17 @@ const Admin = {
           <button class="btn primary" id="save" ${dirty ? '' : 'disabled'}>Speichern</button></div>
       </div>`;
       window.scrollTo(0, scroll);
+      $('#pdf-up', view).onchange = async e => {
+        const file = e.target.files[0];
+        if (!file || !checkPdf(file)) return;
+        toast('PDF wird hochgeladen …');
+        try {
+          S.plan.file_url = await DB.upload(`plaene/${uuid()}-${safeName(file.name)}`, file);
+          toast('PDF hochgeladen – jetzt noch speichern.');
+          render();
+          touch();
+        } catch (x) { toast(friendlyAuthError(x), 'err'); }
+      };
     };
 
     const touch = () => { setDirty(true); const t = $('#dirty-text', view); if (t) t.textContent = 'Ungespeicherte Änderungen'; };
@@ -502,6 +561,27 @@ const Admin = {
       const ei = +(b.closest('[data-e]')?.dataset.e ?? -1);
       const day = S.days[di];
       if (act === 'more') return more();
+      if (act === 'pdf-fields') {
+        const fields = await DB.list('pdf_fields', { plan_id: id });
+        const s = openSheet(`<h2>Felder setzen</h2><div class="pdf-box" id="pdf-ed"></div>`, { wide: true, onClose: () => { fieldCount = fields.length; render(); } });
+        s.classList.add('full');
+        // Änderungen der Reihe nach speichern (Feld erst anlegen, dann verschieben)
+        let queue = Promise.resolve();
+        const run = fn => { queue = queue.then(fn).catch(x => toast(friendlyAuthError(x), 'err')); };
+        try {
+          await PdfView.mount($('#pdf-ed', s), S.plan.file_url, {
+            mode: 'fields', fields,
+            onAdd: f => run(() => DB.insert('pdf_fields', { id: f.id, plan_id: id, page: f.page, kind: f.kind, x: f.x, y: f.y, w: f.w, h: f.h })),
+            onChange: f => run(() => DB.update('pdf_fields', f.id, { x: f.x, y: f.y, w: f.w, h: f.h })),
+            onDelete: f => run(() => DB.remove('pdf_fields', { id: f.id })),
+          });
+        } catch (x) { $('#pdf-ed', s).innerHTML = `<p class="err-box">${esc(friendlyAuthError(x))}</p>`; }
+        return;
+      }
+      if (act === 'pdf-del') {
+        if (!(await confirmSheet('PDF vom Plan entfernen?', 'Entfernen'))) return;
+        S.plan.file_url = null;
+      }
       if (act === 'day-add') {
         const used = new Set(S.days.map(d => d.weekday));
         const wd = [1, 3, 5, 2, 4, 6, 7].find(w => !used.has(w)) || null;
@@ -590,7 +670,7 @@ const Admin = {
         }
         await DB.update('plans', plan.id, {
           title: S.plan.title.trim() || 'Plan', start_date: S.plan.start_date || null, weeks: S.plan.weeks || null,
-          notes: S.plan.notes || '', active: !!S.plan.active, updated_at: new Date().toISOString(),
+          notes: S.plan.notes || '', file_url: S.plan.file_url || null, active: !!S.plan.active, updated_at: new Date().toISOString(),
         });
         if (goneEx.length) await DB.remove('exercises', { id: goneEx });
         await DB.upsert('plan_days', dayRows, 'id');
@@ -612,7 +692,7 @@ const Admin = {
     // Beim Verlassen mit ungespeicherten Änderungen nachfragen (wird von route() geprüft)
     App.guard = { hash: `#/plan/${id}`, ok: () => !dirty || confirm('Änderungen am Plan sind noch nicht gespeichert. Trotzdem verlassen?') };
 
-    if (!S.days.length) S.days.push({ id: uuid(), weekday: 1, title: '', notes: '', exs: [blankEx()] });
+    if (!S.days.length && !S.plan.file_url) S.days.push({ id: uuid(), weekday: 1, title: '', notes: '', exs: [blankEx()] });
     render();
   },
 
@@ -629,7 +709,7 @@ const Admin = {
     const groups = {};
     items.forEach(c => (groups[c.category || 'Allgemein'] = groups[c.category || 'Allgemein'] || []).push(c));
     view.innerHTML = `<div class="page narrow">
-      <header class="page-head"><div><h1>Inhalte</h1><p class="muted">Videos für Technik & Übungen, Bonus für alles Zusätzliche.</p></div>
+      <header class="page-head"><div><h1>Trainingsvideos</h1><p class="muted">Videos für Technik & Übungen, unter „Bonus“ alles Zusätzliche.</p></div>
         <button class="btn primary" id="add">${icon('plus')} Inhalt</button></header>
       <div class="seg"><a href="#/inhalte/videos" class="${section === 'videos' ? 'on' : ''}">Videos</a><a href="#/inhalte/bonus" class="${section === 'bonus' ? 'on' : ''}">Bonus</a></div>
       ${Object.entries(groups).map(([cat, list]) => `<section><h2 class="group-title">${esc(cat)}</h2><div class="content-list">${list.map(c => contentCard(c, tools(c))).join('')}</div></section>`).join('')
@@ -699,6 +779,12 @@ const Admin = {
     };
   },
 };
+
+function checkPdf(file) {
+  if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { toast('Bitte eine PDF-Datei wählen.', 'err'); return false; }
+  if (file.size > MAX_UPLOAD_MB * 1048576) { toast(`Die PDF ist größer als ${MAX_UPLOAD_MB} MB.`, 'err'); return false; }
+  return true;
+}
 
 function safeName(name) {
   return String(name).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w.-]+/g, '-').slice(-60);

@@ -168,6 +168,8 @@ function target(e) {
 function setsText(sets) {
   return (sets || []).filter(s => s.kg || s.reps).map(s => s.kg ? `${String(s.kg).replace('.', ',')} kg × ${s.reps || '–'}` : `${s.reps} Wdh`).join(' · ');
 }
+// Anzeigename einer hochgeladenen Datei ("file:plaene/<uuid>-Name.pdf" → "Name.pdf")
+function fileLabel(url) { return String(url || '').split('/').pop().replace(/^[0-9a-f-]{36}-/, ''); }
 function waLink(text) { return `https://wa.me/?text=${encodeURIComponent(text)}`; }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); toast('Kopiert'); }
