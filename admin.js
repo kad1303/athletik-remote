@@ -457,25 +457,6 @@ const Admin = {
             : '<p class="muted small">Optional: Lade deinen fertigen Plan als PDF hoch. Danach setzt du Felder darauf, in die der Spieler Kreuze und Gewichte einträgt.</p>'}
           <label class="btn block upload-btn">${icon('upload')} ${S.plan.file_url ? 'Andere PDF hochladen (Felder werden neu erkannt)' : 'PDF hochladen'}<input type="file" id="pdf-up" accept="application/pdf,.pdf" hidden></label>
         </section>
-        ${!S.days.length ? `<p class="muted small center">Keine Trainingstage – der Spieler sieht nur das PDF. Mit Trainingstagen kann er zusätzlich Gewichte eintragen und abhaken.</p>` : ''}
-        ${S.days.map((d, di) => `<section class="card ed-day" data-d="${di}">
-          <div class="ed-day-head">
-            <select data-df="weekday" aria-label="Wochentag">
-              <option value="">Flexibel</option>${WD_LONG.map((w, i) => `<option value="${i + 1}" ${d.weekday === i + 1 ? 'selected' : ''}>${w}</option>`).join('')}
-            </select>
-            <input data-df="title" value="${esc(d.title)}" placeholder="z. B. Kraft Unterkörper" class="ed-day-title">
-            <div class="ed-move">
-              <button class="icon-btn sm" data-act="day-up" ${di ? '' : 'disabled'} aria-label="Tag nach oben">${icon('up')}</button>
-              <button class="icon-btn sm" data-act="day-down" ${di < S.days.length - 1 ? '' : 'disabled'} aria-label="Tag nach unten">${icon('down')}</button>
-              <button class="icon-btn sm" data-act="day-copy" aria-label="Tag duplizieren">${icon('copy')}</button>
-              <button class="icon-btn sm" data-act="day-del" aria-label="Tag löschen">${icon('trash')}</button>
-            </div>
-          </div>
-          <input data-df="notes" value="${esc(d.notes || '')}" placeholder="Hinweis für diesen Tag (optional)">
-          <div class="ed-exs">${d.exs.map((e, ei) => exRow(e, di, ei, d.exs.length)).join('')}</div>
-          <button class="btn small ghost" data-act="ex-add">${icon('plus')} Übung</button>
-        </section>`).join('')}
-        <button class="btn block dashed" data-act="day-add">${icon('plus')} Trainingstag hinzufügen</button>
         <div class="save-bar"><span class="muted small" id="dirty-text">${dirty ? 'Ungespeicherte Änderungen' : 'Alles gespeichert'}</span>
           <button class="btn primary" id="save" ${dirty ? '' : 'disabled'}>Speichern</button></div>
       </div>`;
@@ -624,14 +605,6 @@ const Admin = {
       btn.disabled = true;
       btn.textContent = 'Speichert …';
       try {
-        const days = S.days.map((d, i) => ({ ...d, title: d.title.trim() || `Training ${i + 1}`, exs: d.exs.filter(x => x.name.trim()) }));
-        const dayRows = days.map((d, i) => ({ id: d.id, plan_id: plan.id, weekday: d.weekday || null, title: d.title, notes: d.notes || '', sort: i }));
-        const exRows = days.flatMap(d => d.exs.map((x, i) => ({
-          id: x.id, day_id: d.id, sort: i, name: x.name.trim(), sets: +x.sets || 1,
-          reps: (x.reps || '').trim(), load: (x.load || '').trim(), rest: (x.rest || '').trim(), notes: (x.notes || '').trim(), video_url: (x.video_url || '').trim(),
-        })));
-        const goneEx = orig.exs.filter(id => !exRows.some(x => x.id === id));
-        const goneDays = orig.days.filter(id => !dayRows.some(x => x.id === id));
         if (S.plan.active && plan.player_id) {
           for (const x of await DB.list('plans', { player_id: plan.player_id, active: true })) if (x.id !== plan.id) await DB.update('plans', x.id, { active: false });
         }
@@ -639,13 +612,6 @@ const Admin = {
           title: S.plan.title.trim() || 'Plan', start_date: S.plan.start_date || null, weeks: S.plan.weeks || null,
           notes: S.plan.notes || '', file_url: S.plan.file_url || null, active: !!S.plan.active, updated_at: new Date().toISOString(),
         });
-        if (goneEx.length) await DB.remove('exercises', { id: goneEx });
-        await DB.upsert('plan_days', dayRows, 'id');
-        await DB.upsert('exercises', exRows, 'id');
-        if (goneDays.length) await DB.remove('plan_days', { id: goneDays });
-        orig.days = dayRows.map(d => d.id);
-        orig.exs = exRows.map(x => x.id);
-        S.days = days;
         setDirty(false);
         render();
         toast('Gespeichert – der Spieler sieht den Plan sofort.');
@@ -659,7 +625,6 @@ const Admin = {
     // Beim Verlassen mit ungespeicherten Änderungen nachfragen (wird von route() geprüft)
     App.guard = { hash: `#/plan/${id}`, ok: () => !dirty || confirm('Änderungen am Plan sind noch nicht gespeichert. Trotzdem verlassen?') };
 
-    if (!S.days.length && !S.plan.file_url) S.days.push({ id: uuid(), weekday: 1, title: '', notes: '', exs: [blankEx()] });
     render();
   },
 

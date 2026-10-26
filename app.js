@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '14';
+const APP_VERSION = '15';
 
 // Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
 const DEMO_PARAM = new URLSearchParams(location.search).get('demo');
@@ -18,7 +18,7 @@ const DEMO_ROLE_KEY = 'athletik:demo-role';
 const App = { me: null, badge: 0 };
 
 const TABS = {
-  player: [['plan', 'file', 'Plan'], ['videos', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
+  player: [['start', 'home', 'Start'], ['plan', 'file', 'Plan'], ['videos', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
   admin: [['spieler', 'users', 'Spieler'], ['inhalte', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
 };
 
@@ -188,7 +188,7 @@ async function route() {
   }
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   const admin = App.me.role === 'admin';
-  const page = parts[0] || (admin ? 'spieler' : 'plan');
+  const page = parts[0] || (admin ? 'spieler' : 'start');
   const tab = (admin ? { plan: 'spieler', pdf: 'spieler' } : {})[page] || page;
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   const view = $('#view');
@@ -199,7 +199,7 @@ async function route() {
   view.classList.remove('dirty');
   try {
     const handler = page === 'profil' ? renderProfile : admin ? Admin.route(page) : Player.route(page);
-    if (!handler) { location.hash = admin ? '#/spieler' : '#/plan'; return; }
+    if (!handler) { location.hash = admin ? '#/spieler' : '#/start'; return; }
     await handler(view, parts.slice(1), () => seq === routeSeq);
     if (seq === routeSeq) window.scrollTo(0, 0);
   } catch (e) {
