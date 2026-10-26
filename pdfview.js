@@ -131,7 +131,7 @@ const PdfView = {
         if (!v || v.r - v.l > W * 0.18 || Math.abs(v.t - c.t) > 1.5 || colored(c) || colored(v)) continue;
         const txt = textIn(v);
         const row = { key: `${n}|${Math.round(c.t)}`, at: c.l, pitch: (v.r - c.l) * 1.25 };
-        if (/explosiv|✓|done/i.test(txt)) out.push({ ...rel(square(c, true), 'check'), ...row });
+        if (/explosiv|✓|done/i.test(txt)) continue;   // vorgegebene Explosiv-Sätze: nichts einzutragen
         else if (!txt || /kg\b/i.test(txt) || /^[-–]+$/.test(txt) || /^\d+([.,]\d+)?$/.test(txt)) out.push({ ...rel(inset(v, 1), 'kg'), ...row });
       } else if (/^\d+\s*x\s*\d+/i.test(it.s)) {
         const c = cellAt(it.cx, it.cy);
@@ -250,22 +250,24 @@ const PdfView = {
       // Ohne Formularfelder: Ausfüllstellen aus der Tabelle erkennen (Zellränder + Text)
       const imp = $('[data-import]', box);
       imp.hidden = false;
-      imp.textContent = found.length ? `${found.length} Formularfelder übernehmen` : 'Felder automatisch erkennen';
+      const label = () => found.length ? `${found.length} Formularfelder übernehmen` : fields.length ? 'Felder neu erkennen' : 'Felder automatisch erkennen';
+      imp.textContent = label();
+      // Neu erkennen ersetzt alle bisherigen Felder (z. B. nach dem Austausch der PDF)
       imp.onclick = async () => {
+        if (fields.length && !confirm(`Alle ${fields.length} bisherigen Felder löschen und neu erkennen? Bereits eingetragene Werte gehen dabei verloren.`)) return;
         imp.disabled = true;
         imp.textContent = 'Erkenne …';
         try {
           let list = found;
           if (!list.length) for (const p of st.pages) list = list.concat(await this.detect(p.page, p.n));
-          // Stellen, an denen schon ein Feld ist, auslassen
-          const taken = f => fields.some(g => g.page === f.page && f.x + f.w / 2 > g.x && f.x + f.w / 2 < g.x + g.w && f.y + f.h / 2 > g.y && f.y + f.h / 2 < g.y + g.h);
-          const add = list.filter(f => !taken(f));
-          for (const f of add) { const nf = { id: uuid(), ...f }; fields.push(nf); opts.onAdd(nf); }
+          for (const f of fields.splice(0)) opts.onDelete(f);
+          st.selected = null;
+          for (const f of list) { const nf = { id: uuid(), ...f }; fields.push(nf); opts.onAdd(nf); }
           drawFields();
-          toast(add.length ? `${plural(add.length, 'Feld', 'Felder')} angelegt – bitte kurz prüfen` : 'Keine weiteren Ausfüllstellen gefunden');
+          toast(list.length ? `${plural(list.length, 'Feld', 'Felder')} angelegt – bitte kurz prüfen` : 'Keine Ausfüllstellen gefunden – Felder bitte von Hand setzen');
         } catch (x) { console.error(x); toast('Automatische Erkennung hat nicht geklappt.', 'err'); }
         imp.disabled = false;
-        imp.textContent = 'Felder automatisch erkennen';
+        imp.textContent = label();
       };
     }
 

@@ -455,7 +455,7 @@ const Admin = {
             <button class="btn primary block" data-act="pdf-fields">${icon('edit')} Felder zum Ausfüllen setzen${fieldCount ? ` (${fieldCount})` : ''}</button>
             <p class="muted small">${fieldCount ? `${plural(fieldCount, 'Feld', 'Felder')} auf der PDF – der Spieler kann sie abhaken bzw. Gewichte eintragen.` : 'Setz Kreuz- und kg-Felder auf die PDF, damit der Spieler sie ausfüllen kann.'}</p>`
             : '<p class="muted small">Optional: Lade deinen fertigen Plan als PDF hoch. Danach setzt du Felder darauf, in die der Spieler Kreuze und Gewichte einträgt.</p>'}
-          <label class="btn block upload-btn">${icon('upload')} ${S.plan.file_url ? 'Anderes PDF hochladen' : 'PDF hochladen'}<input type="file" id="pdf-up" accept="application/pdf,.pdf" hidden></label>
+          <label class="btn block upload-btn">${icon('upload')} ${S.plan.file_url ? 'Andere PDF hochladen (Felder werden neu erkannt)' : 'PDF hochladen'}<input type="file" id="pdf-up" accept="application/pdf,.pdf" hidden></label>
         </section>
         ${!S.days.length ? `<p class="muted small center">Keine Trainingstage – der Spieler sieht nur das PDF. Mit Trainingstagen kann er zusätzlich Gewichte eintragen und abhaken.</p>` : ''}
         ${S.days.map((d, di) => `<section class="card ed-day" data-d="${di}">
@@ -486,10 +486,13 @@ const Admin = {
         toast('PDF wird hochgeladen …');
         try {
           S.plan.file_url = await DB.upload(`plaene/${uuid()}-${safeName(file.name)}`, file);
-          if (!fieldCount) fieldCount = await this.autoFields(id, S.plan.file_url);
-          toast(`PDF hochgeladen${fieldCount ? `, ${plural(fieldCount, 'Feld', 'Felder')} gesetzt` : ''} – jetzt noch speichern.`);
+          // Neue PDF gilt sofort; Felder der alten PDF passen nicht mehr → neu erkennen
+          await DB.update('plans', id, { file_url: S.plan.file_url });
+          plan.file_url = S.plan.file_url;
+          if (fieldCount) await DB.remove('pdf_fields', { plan_id: id });
+          fieldCount = await this.autoFields(id, S.plan.file_url);
+          toast(`PDF hochgeladen${fieldCount ? `, ${plural(fieldCount, 'Feld', 'Felder')} automatisch gesetzt` : ''}`);
           render();
-          touch();
         } catch (x) { toast(friendlyAuthError(x), 'err'); }
       };
     };
