@@ -31,7 +31,6 @@ const Player = {
         <h2>Diese Woche</h2>
         <div class="week5">${week.map(d => `<div class="wk-day ${d === today ? 'today' : ''} ${active.has(d) ? 'done' : ''}">
           <span>${WD[Dates.weekday(d) - 1]}</span><strong>${Dates.parse(d).getDate()}</strong><i>${active.has(d) ? icon('check') : ''}</i></div>`).join('')}</div>
-        <p class="muted small">${week.some(d => active.has(d)) ? 'Ein Haken zeigt, an welchen Tagen du etwas in deinen Plan eingetragen hast.' : 'Sobald du in deinem Plan etwas einträgst, erscheint hier ein Haken.'}</p>
       </section>
       ${hasPlan ? `<a class="start-card" href="#/plan">
           <span class="eyebrow">Dein Trainingsplan</span>
