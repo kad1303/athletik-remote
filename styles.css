@@ -431,3 +431,9 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .pv-row { display: flex; align-items: center; gap: 10px; }
 .pv-row input { font-size: 1.6rem; font-weight: 800; text-align: center; padding: 14px; }
 .pv-row span { font-size: 1.2rem; font-weight: 700; color: var(--muted); }
+.pdf-field.sel { overflow: visible; z-index: 2; }
+.pdf-handle {
+  position: absolute; right: -9px; bottom: -9px; width: 18px; height: 18px; border-radius: 50%;
+  background: #e0451f; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.35); cursor: nwse-resize; touch-action: none;
+}
+.pdf-handle::after { content: ""; position: absolute; inset: -10px; }   /* größere Tippfläche */

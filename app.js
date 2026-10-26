@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '3';
+const APP_VERSION = '4';
 
 const DEMO = !Auth.configured();
 const DB = DEMO ? Demo.load() : Remote;

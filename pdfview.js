@@ -38,7 +38,7 @@ const PdfView = {
   async mount(box, url, opts) {
     box.innerHTML = '<div class="spinner"></div>';
     const doc = await this.load(url);
-    const st = { zoom: 1, tool: 'check', selected: null, pages: [] };
+    const st = { zoom: 1, tool: 'check', selected: null, pages: [], lastSize: {} };
     const fields = opts.fields;
     const values = opts.values || {};
     const editing = opts.mode === 'fields';
@@ -49,7 +49,7 @@ const PdfView = {
           <button class="btn small" data-import hidden></button>` : ''}
         <span class="pdf-zoom"><button class="icon-btn sm" data-zoom="-1" aria-label="Verkleinern">−</button><span class="num" id="zoom-val">100 %</span><button class="icon-btn sm" data-zoom="1" aria-label="Vergrößern">+</button></span>
       </div>
-      ${editing ? '<p class="muted small pdf-hint">Feldart wählen und auf die Stelle in der PDF tippen. Felder lassen sich verschieben; antippen zum Auswählen.</p>' : ''}
+      ${editing ? '<p class="muted small pdf-hint">Feldart wählen und auf die Stelle in der PDF tippen. Feld ziehen = verschieben, roten Punkt unten rechts ziehen = Breite und Höhe ändern. Neue Felder übernehmen die zuletzt eingestellte Größe.</p>' : ''}
       <div class="pdf-scroll"><div class="pdf-pages"></div></div>`;
     const scroll = $('.pdf-scroll', box);
     const pagesEl = $('.pdf-pages', box);
@@ -58,13 +58,14 @@ const PdfView = {
       const v = values[f.id] || '';
       const text = f.kind === 'check' ? (v ? '✕' : '') : esc(v);
       return `<div class="pdf-field ${f.kind} ${v ? 'filled' : ''} ${st.selected === f.id ? 'sel' : ''}" data-fid="${f.id}"
-        style="left:${f.x * 100}%;top:${f.y * 100}%;width:${f.w * 100}%;height:${f.h * 100}%">${text || (editing ? `<i>${f.kind === 'check' ? '' : FIELD_LABEL[f.kind]}</i>` : '')}</div>`;
+        style="left:${f.x * 100}%;top:${f.y * 100}%;width:${f.w * 100}%;height:${f.h * 100}%">${text || (editing ? `<i>${f.kind === 'check' ? '' : FIELD_LABEL[f.kind]}</i>` : '')}${editing && st.selected === f.id ? '<span class="pdf-handle" title="Ziehen = Größe ändern"></span>' : ''}</div>`;
     };
+    const fitFont = el => { el.style.fontSize = `${Math.max(9, el.offsetHeight * 0.72)}px`; };
     const drawFields = () => {
       st.pages.forEach(p => {
         p.layer.innerHTML = fields.filter(f => f.page === p.n).map(fieldHtml).join('');
         // Schriftgröße passend zur Feldhöhe
-        p.layer.querySelectorAll('.pdf-field').forEach(el => { el.style.fontSize = `${Math.max(9, el.offsetHeight * 0.72)}px`; });
+        p.layer.querySelectorAll('.pdf-field').forEach(fitFont);
       });
       const sel = $('.pdf-sel', box);
       if (sel) sel.hidden = !st.selected;
@@ -147,6 +148,7 @@ const PdfView = {
         } else {
           const k = s.dataset.sel === 'bigger' ? 1.2 : 1 / 1.2;
           f.w = Math.min(0.9, f.w * k); f.h = Math.min(0.5, f.h * k);
+          st.lastSize[f.kind] = [f.w, f.h];
           opts.onChange(f);
         }
         drawFields();
@@ -154,6 +156,28 @@ const PdfView = {
     });
 
     if (editing) {
+      // Am Computer: Pfeiltasten verschieben das ausgewählte Feld fein, mit Umschalt ändern sie die Größe
+      const onKey = e => {
+        if (!box.isConnected) { document.removeEventListener('keydown', onKey); return; }
+        const f = st.selected && fields.find(x => x.id === st.selected);
+        const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+        if (!f || !dir || /input|textarea|select/i.test(e.target.tagName)) return;
+        e.preventDefault();
+        const step = 0.002;
+        if (e.shiftKey) {
+          f.w = Math.max(0.008, Math.min(1 - f.x, f.w + dir[0] * step));
+          f.h = Math.max(0.006, Math.min(1 - f.y, f.h + dir[1] * step));
+          st.lastSize[f.kind] = [f.w, f.h];
+        } else {
+          f.x = Math.max(0, Math.min(1 - f.w, f.x + dir[0] * step));
+          f.y = Math.max(0, Math.min(1 - f.h, f.y + dir[1] * step));
+        }
+        drawFields();
+        clearTimeout(st.keyTimer);
+        st.keyTimer = setTimeout(() => opts.onChange(f), 400);
+      };
+      document.addEventListener('keydown', onKey);
+
       // Tippen auf leere Stelle = neues Feld, Feld ziehen = verschieben, Feld antippen = auswählen
       let drag = null;
       pagesEl.addEventListener('pointerdown', e => {
@@ -163,7 +187,7 @@ const PdfView = {
         const rect = layer.getBoundingClientRect();
         if (el) {
           const f = fields.find(x => x.id === el.dataset.fid);
-          drag = { f, el, rect, sx: e.clientX, sy: e.clientY, ox: f.x, oy: f.y, moved: false };
+          drag = { f, el, rect, sx: e.clientX, sy: e.clientY, ox: f.x, oy: f.y, ow: f.w, oh: f.h, moved: false, resize: !!e.target.closest('.pdf-handle') };
           el.setPointerCapture(e.pointerId);
           e.preventDefault();
         } else {
@@ -175,6 +199,14 @@ const PdfView = {
         const dx = (e.clientX - drag.sx) / drag.rect.width, dy = (e.clientY - drag.sy) / drag.rect.height;
         if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;
         drag.moved = true;
+        if (drag.resize) {
+          drag.f.w = Math.max(0.008, Math.min(1 - drag.f.x, drag.ow + dx));
+          drag.f.h = Math.max(0.006, Math.min(1 - drag.f.y, drag.oh + dy));
+          drag.el.style.width = `${drag.f.w * 100}%`;
+          drag.el.style.height = `${drag.f.h * 100}%`;
+          fitFont(drag.el);
+          return;
+        }
         drag.f.x = Math.max(0, Math.min(1 - drag.f.w, drag.ox + dx));
         drag.f.y = Math.max(0, Math.min(1 - drag.f.h, drag.oy + dy));
         drag.el.style.left = `${drag.f.x * 100}%`;
@@ -190,7 +222,7 @@ const PdfView = {
           if (st.selected) { st.selected = null; drawFields(); return; }
           const p = st.pages.find(x => x.n === +d.layer.dataset.page);
           const [w0, h0] = FIELD_SIZE[st.tool];
-          const w = w0, h = h0 ?? w0 * p.ratio;
+          const [w, h] = st.lastSize[st.tool] || [w0, h0 ?? w0 * p.ratio];
           const f = {
             id: uuid(), page: p.n, kind: st.tool, w, h,
             x: Math.max(0, Math.min(1 - w, (e.clientX - d.rect.left) / d.rect.width - w / 2)),
@@ -200,6 +232,9 @@ const PdfView = {
           drawFields();
           opts.onAdd(f);
         } else if (d.moved) {
+          if (d.resize) st.lastSize[d.f.kind] = [d.f.w, d.f.h];
+          st.selected = d.f.id;
+          drawFields();
           opts.onChange(d.f);
         } else {
           st.selected = st.selected === d.f.id ? null : d.f.id;
