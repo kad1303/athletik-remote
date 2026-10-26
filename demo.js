@@ -16,7 +16,7 @@ const Demo = {
 
   load() {
     try { this.db = JSON.parse(localStorage.getItem(DEMO_KEY)); } catch { this.db = null; }
-    if (!this.db || this.db.v !== 5) this.db = this.seed();
+    if (!this.db || this.db.v !== 6) this.db = this.seed();
     return this;
   },
 
@@ -189,7 +189,6 @@ const Demo = {
       return plan;
     };
     const kraft = {
-      notes: 'Vor jeder Einheit 10 Min. Aufwärmen (Seilspringen, Mobility). Bei Schmerzen abbrechen und Alex Bescheid geben.',
       days: [
         { wd: 1, title: 'Kraft Unterkörper', ex: [['Kniebeuge', 4, '6', '60 kg', '2 min', 'Tiefe bis Parallele, Knie stabil'], ['Rumänisches Kreuzheben', 3, '8', '50 kg', '90 s'], ['Bulgarian Split Squat', 3, '8 je Seite', '2× 12 kg', '90 s'], ['Wadenheben einbeinig', 3, '12', 'Körpergewicht', '60 s']] },
         { wd: 3, title: 'Schnelligkeit & Sprungkraft', notes: 'Volle Pause zwischen den Sätzen – Qualität vor Menge.', ex: [['Box Jumps', 4, '5', '', '90 s'], ['Seitliche Sprünge (Skater)', 3, '6 je Seite'], ['Sprints 10 m', 6, '1', '', '60 s'], ['Medizinball Rotationswurf', 3, '6 je Seite', '3 kg']] },
@@ -234,14 +233,10 @@ const Demo = {
     });
 
     const content = [
-      { id: id(), section: 'videos', category: 'Aufwärmen', title: 'Aufwärmprogramm vor dem Krafttraining (10 Min.)', body: 'Vor jeder Einheit komplett durchgehen.', url: '', audience: null, sort: 0, created_at: ago(20) },
-      { id: id(), section: 'videos', category: 'Technik', title: 'Kniebeuge – die 5 wichtigsten Punkte', body: 'Füße schulterbreit, Knie über die Zehen, Brust raus.', url: '', audience: null, sort: 1, created_at: ago(19) },
-      { id: id(), section: 'bonus', category: 'Ernährung', title: 'Was esse ich am Turniertag?', body: 'Frühstück 2–3 h vor dem Match: Haferflocken, Banane, etwas Eiweiß.\nZwischen den Matches: Banane, Reiswaffeln, Wasser mit Elektrolyten.\nNach dem Match: innerhalb von 60 Min. Kohlenhydrate + Eiweiß.', url: '', audience: null, sort: 0, created_at: ago(15) },
-      { id: id(), section: 'bonus', category: 'Regeneration', title: 'Schlaf & Regeneration – kurz erklärt', body: '8+ Stunden Schlaf sind dein bestes Regenerationsmittel. Handy 30 Min. vor dem Schlafen weg.', url: '', audience: null, sort: 1, created_at: ago(8) },
     ];
 
     return {
-      v: 5,
+      v: 6,
       players, invites, plans, plan_days: days, exercises, logs, feedback, content, pdf_fields, pdf_values,
       members: [
         { user_id: 'demo-admin', name: 'Alex', role: 'admin', player_id: null },

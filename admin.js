@@ -374,7 +374,7 @@ const Admin = {
     const [days, player, library] = await Promise.all([
       DB.list('plan_days', { plan_id: id }, { order: 'sort' }),
       plan.player_id ? DB.list('players', { id: plan.player_id }).then(r => r[0]) : null,
-      DB.list('content', { section: 'videos' }, { order: 'category,title' }),
+      DB.list('content', { section: 'videos' }, { order: 'title' }),
     ]);
     const exs = await DB.list('exercises', { day_id: days.map(d => d.id) }, { order: 'sort' });
     let fieldCount = plan.file_url ? (await DB.list('pdf_fields', { plan_id: id }, { select: 'id' })).length : 0;
@@ -546,7 +546,7 @@ const Admin = {
 
     const pickVideo = (ex, row) => {
       const s = openSheet(`<h2>Video für „${esc(ex.name || 'Übung')}“</h2>
-        ${library.length ? `<div class="pick-list">${library.map(c => `<button class="pick-row" data-url="${esc(c.url || '')}" ${c.url ? '' : 'disabled'}>${icon('play')}<span><strong>${esc(c.title)}</strong><small class="muted">${esc(c.category || '')}</small></span></button>`).join('')}</div>` : '<p class="muted">In der Mediathek (Inhalte → Videos) ist noch nichts.</p>'}
+        ${library.length ? `<div class="pick-list">${library.map(c => `<button class="pick-row" data-url="${esc(c.url || '')}" ${c.url ? '' : 'disabled'}>${icon('play')}<span><strong>${esc(c.title)}</strong></span></button>`).join('')}</div>` : '<p class="muted">In der Mediathek (Inhalte → Videos) ist noch nichts.</p>'}
         <label class="btn block upload-btn">${icon('upload')} Eigenes Video hochladen (max. ${MAX_UPLOAD_MB} MB)<input type="file" accept="video/*" hidden></label>
         <p class="muted small">Tipp: Längere Videos am besten bei YouTube als „nicht gelistet“ hochladen und den Link einfügen.</p>`);
       const set = url => { ex.video_url = url; row.querySelector('[data-f="video_url"]').value = url; touch(); closeSheet(); };
@@ -640,20 +640,17 @@ const Admin = {
   /* ---------- Trainingsvideos ---------- */
   async content(view, section, live) {
     const [items, players] = await Promise.all([
-      DB.list('content', { section }, { order: 'category,sort,-created_at' }),
+      DB.list('content', { section }, { order: 'sort,-created_at' }),
       DB.list('players', { active: true }, { order: 'name', select: 'id,name' }),
     ]);
     if (!live()) return;
     const nameOf = id => (players.find(p => p.id === id) || {}).name || '?';
     const tools = c => `<div class="cc-tools">${c.audience && c.audience.length ? `<span class="pill" title="${esc(c.audience.map(nameOf).join(', '))}">${plural(c.audience.length, 'Spieler', 'Spieler')}</span>` : '<span class="pill">alle</span>'}
       <button class="icon-btn sm" data-edit="${c.id}" aria-label="Bearbeiten">${icon('edit')}</button><button class="icon-btn sm" data-del="${c.id}" aria-label="Löschen">${icon('trash')}</button></div>`;
-    const groups = {};
-    items.forEach(c => (groups[c.category || 'Allgemein'] = groups[c.category || 'Allgemein'] || []).push(c));
     view.innerHTML = `<div class="page narrow">
       <header class="page-head"><div><h1>Trainingsvideos</h1><p class="muted">Videos für Technik & Übungen – die Spieler finden sie im Reiter „Videos“.</p></div>
         <button class="btn primary" id="add">${icon('plus')} Video</button></header>
-      ${Object.entries(groups).map(([cat, list]) => `<section><h2 class="group-title">${esc(cat)}</h2><div class="content-list">${list.map(c => contentCard(c, tools(c))).join('')}</div></section>`).join('')
-        || '<section class="card empty"><p class="muted">Noch nichts hochgeladen.</p></section>'}
+      ${items.length ? `<div class="content-list">${items.map(c => contentCard(c, tools(c))).join('')}</div>` : '<section class="card empty"><p class="muted">Noch keine Videos hochgeladen.</p></section>'}
     </div>`;
     bindContent(view);
     $('#add').onclick = () => this.editContent({ section }, items, players);
@@ -668,13 +665,10 @@ const Admin = {
   },
 
   editContent(c, items, players) {
-    const cats = [...new Set(items.map(x => x.category).filter(Boolean))];
     const aud = c.audience || [];
     const s = openSheet(`<h2>${c.id ? 'Video bearbeiten' : 'Neues Video'}</h2>
       <form class="form" id="cf">
         <label>Titel<input name="title" value="${esc(c.title || '')}" required></label>
-        <label>Kategorie<input name="category" value="${esc(c.category || '')}" list="cats" placeholder="z. B. Technik, Aufwärmen, Ernährung"></label>
-        <datalist id="cats">${cats.map(x => `<option>${esc(x)}</option>`).join('')}</datalist>
         <label>Text (optional)<textarea name="body" rows="4">${esc(c.body || '')}</textarea></label>
         <label>Link (YouTube, Vimeo, Webseite …)<input name="url" value="${esc(c.url && !c.url.startsWith('file:') ? c.url : '')}" placeholder="https://"></label>
         <label class="btn block upload-btn">${icon('upload')} <span id="fname">${c.url && c.url.startsWith('file:') ? esc(c.url.split('/').pop().replace(/^[\w-]{36}-/, '')) : `Oder Video hochladen (max. ${MAX_UPLOAD_MB} MB)`}</span><input type="file" name="file" accept="video/*" hidden></label>
@@ -706,7 +700,7 @@ const Admin = {
         }
         const who = $$('input[name=who]:checked', f).map(x => x.value);
         const row = {
-          section: 'videos', title: el.title.value.trim(), category: el.category.value.trim() || null,
+          section: 'videos', title: el.title.value.trim(),
           body: el.body.value.trim(), url: url || null, audience: el.aud.value === 'some' && who.length ? who : null,
         };
         if (c.id) await DB.update('content', c.id, row);

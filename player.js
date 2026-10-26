@@ -60,13 +60,9 @@ const Player = {
   async videos(view, live) {
     const items = await DB.list('content', { section: 'videos' }, { order: 'sort,-created_at' });
     if (!live()) return;
-    const groups = {};
-    items.forEach(c => (groups[c.category || 'Allgemein'] = groups[c.category || 'Allgemein'] || []).push(c));
     view.innerHTML = `<div class="page narrow">
       <header class="page-head"><div><h1>Trainingsvideos</h1><p class="muted">Technik und Übungen von Alex.</p></div></header>
-      ${Object.entries(groups).map(([cat, list]) => `<section><h2 class="group-title">${esc(cat)}</h2>
-        <div class="content-list">${list.map(c => contentCard(c)).join('')}</div></section>`).join('')
-        || `<section class="card empty">${icon('play', 'big')}<p class="muted">Hier ist noch nichts – Alex lädt bald Videos hoch.</p></section>`}
+      ${items.length ? `<div class="content-list">${items.map(c => contentCard(c)).join('')}</div>` : `<section class="card empty">${icon('play', 'big')}<p class="muted">Hier ist noch nichts – Alex lädt bald Videos hoch.</p></section>`}
     </div>`;
     bindContent(view);
   },
