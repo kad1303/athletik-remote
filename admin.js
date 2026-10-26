@@ -485,9 +485,12 @@ const Admin = {
         if (!file || !checkPdf(file)) return;
         toast('PDF wird hochgeladen …');
         try {
+          // Hieß der Plan wie die alte PDF, bekommt er den Namen der neuen
+          const norm = s => String(s || '').replace(/\.pdf$/i, '').replace(/[\s_-]+/g, '').toLowerCase();
+          if (!S.plan.title || norm(S.plan.title) === norm(fileLabel(S.plan.file_url))) S.plan.title = file.name.replace(/\.pdf$/i, '');
           S.plan.file_url = await DB.upload(`plaene/${uuid()}-${safeName(file.name)}`, file);
           // Neue PDF gilt sofort; Felder der alten PDF passen nicht mehr → neu erkennen
-          await DB.update('plans', id, { file_url: S.plan.file_url });
+          await DB.update('plans', id, { file_url: S.plan.file_url, title: S.plan.title });
           plan.file_url = S.plan.file_url;
           if (fieldCount) await DB.remove('pdf_fields', { plan_id: id });
           fieldCount = await this.autoFields(id, S.plan.file_url);
