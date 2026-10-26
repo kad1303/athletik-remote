@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '2';
+const APP_VERSION = '3';
 
 const DEMO = !Auth.configured();
 const DB = DEMO ? Demo.load() : Remote;
@@ -45,12 +45,15 @@ async function boot() {
   Auth.load();
   if (!Auth.session) return invite ? renderInvite(invite) : renderLogin();
   try {
+    let [mem] = await DB.list('members', { user_id: Auth.session.user.id });
     if (invite) {
+      // Schon angemeldet: Einladung NICHT mit diesem Zugang einlösen (sonst wird z. B. aus Alex ein Spieler)
+      if (mem) return renderInviteWhileLoggedIn(invite, mem);
       try { await Remote.rpc('redeem_invite', { p_code: invite }); }
-      catch (e) { if (!String(e.message).includes('invalid_invite')) throw e; }
+      catch (e) { if (!/invalid_invite|already_member/.test(String(e.message))) throw e; }
       sessionStorage.removeItem(INVITE_KEY);
+      [mem] = await DB.list('members', { user_id: Auth.session.user.id });
     }
-    const [mem] = await DB.list('members', { user_id: Auth.session.user.id });
     if (!mem) return renderNoAccess();
     App.me = { ...mem, email: Auth.session.user.email };
     startShell();
@@ -69,6 +72,16 @@ function renderFrame(inner) {
 function renderError(e) {
   renderFrame(`<p class="err-box">${esc(friendlyAuthError(e))}</p><button class="btn primary block" id="retry">Nochmal versuchen</button>`);
   $('#retry').onclick = boot;
+}
+
+function renderInviteWhileLoggedIn(code, mem) {
+  renderFrame(`<h1>Einladungslink</h1>
+    <p class="muted">Du bist gerade angemeldet als <strong>${esc(mem.name)}</strong> (${esc(Auth.session.user.email)}, ${mem.role === 'admin' ? 'Trainer' : 'Spieler'}).
+      Ein Einladungslink ist für einen <strong>neuen</strong> Zugang gedacht.</p>
+    <button class="btn primary block" id="inv-new">Abmelden und neuen Zugang anlegen</button>
+    <button class="btn block" id="inv-stay">Angemeldet bleiben</button>`);
+  $('#inv-new').onclick = async () => { await Auth.signOut(); renderInvite(code); };
+  $('#inv-stay').onclick = () => { sessionStorage.removeItem(INVITE_KEY); boot(); };
 }
 
 function renderNoAccess() {
