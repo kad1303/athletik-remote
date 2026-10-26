@@ -32,6 +32,132 @@ const PdfView = {
     return lib.getDocument({ data: await res.arrayBuffer() }).promise;
   },
 
+  /* Erkennt Ausfüllstellen in Tabellen-Plänen (z. B. Excel-Export):
+     Zelle rechts neben einer Wiederholungsangabe („10ea“, „5“) → kg-Feld, bei „Explosiv“ ein Kreuz in der Wdh-Zelle;
+     Zelle unter einer Circuit-Angabe („3x12x10''“) → Kreuz. Zellränder kommen aus den Linien der PDF. */
+  async detect(page, n) {
+    const O = pdfjsLib.OPS;
+    const vp = page.getViewport({ scale: 1 });
+    const W = vp.width, H = vp.height;
+    const ol = await page.getOperatorList();
+    const mul = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const stack = [];
+    const pt = (x, y) => vp.convertToViewportPoint(ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5]);
+    const V = [], Hz = [];   // senkrechte {x, y1, y2} und waagerechte {y, x1, x2} Linien
+    const Fills = [];        // farbige Flächen – dort wird nichts eingetragen (Überschriften, Ampeln …)
+    const seg = (a, b) => {
+      if (Math.abs(a[0] - b[0]) < 1.8) V.push({ x: (a[0] + b[0]) / 2, y1: Math.min(a[1], b[1]), y2: Math.max(a[1], b[1]) });
+      else if (Math.abs(a[1] - b[1]) < 1.8) Hz.push({ y: (a[1] + b[1]) / 2, x1: Math.min(a[0], b[0]), x2: Math.max(a[0], b[0]) });
+    };
+    let path = null, fillWhite = false, strokeWhite = false;
+    const white = c => c && c[0] > 240 && c[1] > 240 && c[2] > 240;
+    for (let i = 0; i < ol.fnArray.length; i++) {
+      const f = ol.fnArray[i], a = ol.argsArray[i];
+      if (f === O.save) stack.push(ctm);
+      else if (f === O.restore) ctm = stack.pop() || ctm;
+      else if (f === O.transform) ctm = mul(ctm, a);
+      else if (f === O.setFillRGBColor) fillWhite = white(a);
+      else if (f === O.setStrokeRGBColor) strokeWhite = white(a);
+      else if (f === O.constructPath) {
+        path = { rects: [], lines: [] };
+        let k = 0, last = null;
+        for (const op of a[0]) {
+          if (op === O.rectangle) {
+            const [x, y, w, h] = a[1].slice(k, k + 4); k += 4;
+            path.rects.push([pt(x, y), pt(x + w, y + h)]);
+          } else if (op === O.moveTo) { last = pt(a[1][k], a[1][k + 1]); k += 2; }
+          else if (op === O.lineTo) { const p = pt(a[1][k], a[1][k + 1]); k += 2; if (last) path.lines.push([last, p]); last = p; }
+          else if (op === O.curveTo) k += 6;
+          else if (op === O.curveTo2 || op === O.curveTo3) k += 4;
+        }
+      } else if (path && [O.fill, O.eoFill, O.stroke, O.closeStroke, O.fillStroke, O.eoFillStroke, O.closeFillStroke, O.closeEOFillStroke].includes(f)) {
+        const stroke = f !== O.fill && f !== O.eoFill;
+        if (!(stroke ? strokeWhite : fillWhite)) {
+          for (const [p, q] of path.rects) {
+            const x1 = Math.min(p[0], q[0]), x2 = Math.max(p[0], q[0]), y1 = Math.min(p[1], q[1]), y2 = Math.max(p[1], q[1]);
+            if (x2 - x1 < 1.8 || y2 - y1 < 1.8) seg([x1, y1], [x2, y2]);   // dünnes Rechteck = Linie
+            else if (!stroke) Fills.push({ x1, x2, y1, y2 });              // farbig hinterlegte Zelle
+            else if (stroke) { seg([x1, y1], [x2, y1]); seg([x1, y2], [x2, y2]); seg([x1, y1], [x1, y2]); seg([x2, y1], [x2, y2]); }
+          }
+          if (stroke) path.lines.forEach(([p, q]) => seg(p, q));
+        }
+        path = null;
+      } else if (f === O.endPath) path = null;
+    }
+
+    const cellAt = (px, py) => {
+      const t = 0.6;
+      const vs = V.filter(v => v.y1 - t <= py && v.y2 + t >= py);
+      const hs = Hz.filter(h => h.x1 - t <= px && h.x2 + t >= px);
+      const l = Math.max(...vs.filter(v => v.x < px).map(v => v.x));
+      const r = Math.min(...vs.filter(v => v.x > px).map(v => v.x));
+      const top = Math.max(...hs.filter(h => h.y < py).map(h => h.y));
+      const b = Math.min(...hs.filter(h => h.y > py).map(h => h.y));
+      return [l, r, top, b].every(Number.isFinite) ? { l, r, t: top, b } : null;
+    };
+
+    const tc = await page.getTextContent();
+    const items = tc.items.filter(it => it.str.trim()).map(it => {
+      const [x, y] = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
+      const h = it.height || Math.hypot(it.transform[2], it.transform[3]);
+      return { s: it.str.trim(), cx: x + Math.min(it.width, 30) / 2, cy: y - h * 0.35 };
+    });
+    // Kleine Flächen (z. B. Haken-Grafik) zählen nicht, nur solche, die die Zelle weitgehend füllen
+    const colored = c => Fills.some(f => f.x1 <= c.l + 2 && f.x2 >= c.r - 2 && f.y1 <= c.t + 2 && f.y2 >= c.b - 2 && (f.x2 - f.x1) < 400);
+    const textIn = c => items.filter(i => i.cx > c.l && i.cx < c.r && i.cy > c.t && i.cy < c.b).map(i => i.s).join(' ').trim();
+    const rel = (c, kind) => ({ page: n, kind, x: c.l / W, y: c.t / H, w: (c.r - c.l) / W, h: (c.b - c.t) / H });
+    const inset = (c, d) => ({ l: c.l + d, r: c.r - d, t: c.t + d, b: c.b - d });
+    const square = (c, right) => {
+      const s = Math.max(4, Math.min(c.b - c.t, c.r - c.l) - 2.6);
+      const x = right ? c.r - s - 1.3 : c.l + 1.3;
+      return { l: x, r: x + s, t: c.t + (c.b - c.t - s) / 2, b: c.t + (c.b - c.t + s) / 2 };
+    };
+
+    const out = [];
+    for (const it of items) {
+      if (/^\d{1,2}\s*(ea|x)?$/i.test(it.s)) {
+        const c = cellAt(it.cx, it.cy);
+        if (!c || c.r - c.l > 60) continue;
+        const v = cellAt(c.r + 0.9, it.cy);
+        if (!v || v.r - v.l > 60 || Math.abs(v.t - c.t) > 1.5 || colored(c) || colored(v)) continue;
+        const txt = textIn(v);
+        const row = { key: `${n}|${Math.round(c.t)}`, at: c.l, pitch: (v.r - c.l) * 1.25 };
+        if (/explosiv|✓|done/i.test(txt)) out.push({ ...rel(square(c, true), 'check'), ...row });
+        else if (!txt || /kg\b/i.test(txt) || /^[-–]+$/.test(txt) || /^\d+([.,]\d+)?$/.test(txt)) out.push({ ...rel(inset(v, 1), 'kg'), ...row });
+      } else if (/^\d+\s*x\s*\d+/i.test(it.s)) {
+        const c = cellAt(it.cx, it.cy);
+        if (!c) continue;
+        const d = cellAt(it.cx, c.b + 0.9);
+        if (!d || Math.abs(d.t - c.b) > 1.5 || Math.abs(d.l - c.l) > 1.5) continue;
+        const txt = textIn(d);
+        if (!txt || /done|✓|erledigt/i.test(txt)) out.push({ ...rel(square(d, false), 'check'), circuit: true });
+      }
+    }
+    // Wochen-Spalten erkennen: in einer Zeile mindestens 3 Treffer direkt nebeneinander
+    // (so fallen einzelne Zahlen in anderen Tabellen derselben Zeile raus)
+    const keep = new Set(out.filter(f => f.circuit));
+    const rows = {};
+    out.filter(f => f.key).forEach(f => (rows[f.key] = rows[f.key] || []).push(f));
+    for (const list of Object.values(rows)) {
+      list.sort((a, b) => a.at - b.at);
+      let run = [list[0]];
+      const flush = () => { if (run.length >= 3) run.forEach(f => keep.add(f)); };
+      for (const f of list.slice(1)) {
+        if (f.at - run[run.length - 1].at <= f.pitch) run.push(f);
+        else { flush(); run = [f]; }
+      }
+      flush();
+    }
+    const seen = new Set();
+    return out.filter(f => keep.has(f)).filter(f => {
+      const k = `${f.page}|${f.x.toFixed(3)}|${f.y.toFixed(3)}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).map(({ page, kind, x, y, w, h }) => ({ page, kind, x, y, w, h }));
+  },
+
   /* Zeigt die PDF in box an.
      opts: { mode: 'fields' | 'fill' | 'view', fields, values: { fieldId: wert },
              onAdd(f), onChange(f), onDelete(f), onValue(f, wert) } */
@@ -113,18 +239,26 @@ const PdfView = {
           found.push({ page: p.n, kind, x: Math.min(x1, x2) / p.base.width, y: Math.min(y1, y2) / p.base.height, w: Math.abs(x2 - x1) / p.base.width, h: Math.abs(y2 - y1) / p.base.height });
         }
       }
+      // Ohne Formularfelder: Ausfüllstellen aus der Tabelle erkennen (Zellränder + Text)
       const imp = $('[data-import]', box);
-      if (found.length && !fields.length) {
-        imp.hidden = false;
-        imp.textContent = `${found.length} Formularfelder aus der PDF übernehmen`;
-        imp.onclick = async () => {
-          imp.disabled = true;
-          for (const f of found) { const nf = { id: uuid(), ...f }; fields.push(nf); await opts.onAdd(nf); }
-          imp.hidden = true;
+      imp.hidden = false;
+      imp.textContent = found.length ? `${found.length} Formularfelder übernehmen` : 'Felder automatisch erkennen';
+      imp.onclick = async () => {
+        imp.disabled = true;
+        imp.textContent = 'Erkenne …';
+        try {
+          let list = found;
+          if (!list.length) for (const p of st.pages) list = list.concat(await this.detect(p.page, p.n));
+          // Stellen, an denen schon ein Feld ist, auslassen
+          const taken = f => fields.some(g => g.page === f.page && f.x + f.w / 2 > g.x && f.x + f.w / 2 < g.x + g.w && f.y + f.h / 2 > g.y && f.y + f.h / 2 < g.y + g.h);
+          const add = list.filter(f => !taken(f));
+          for (const f of add) { const nf = { id: uuid(), ...f }; fields.push(nf); opts.onAdd(nf); }
           drawFields();
-          toast(`${found.length} Felder übernommen`);
-        };
-      }
+          toast(add.length ? `${plural(add.length, 'Feld', 'Felder')} angelegt – bitte kurz prüfen` : 'Keine weiteren Ausfüllstellen gefunden');
+        } catch (x) { console.error(x); toast('Automatische Erkennung hat nicht geklappt.', 'err'); }
+        imp.disabled = false;
+        imp.textContent = 'Felder automatisch erkennen';
+      };
     }
 
     /* ---------- Bedienung ---------- */
