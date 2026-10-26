@@ -6,9 +6,11 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '6';
+const APP_VERSION = '7';
 
-const DEMO = !Auth.configured();
+// Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
+const DEMO_PARAM = new URLSearchParams(location.search).get('demo');
+const DEMO = !Auth.configured() || DEMO_PARAM !== null;
 const DB = DEMO ? Demo.load() : Remote;
 const INVITE_KEY = 'athletik:invite';
 const DEMO_ROLE_KEY = 'athletik:demo-role';
@@ -33,6 +35,11 @@ async function boot() {
   const invite = sessionStorage.getItem(INVITE_KEY);
 
   if (DEMO) {
+    // ?demo=spieler / ?demo=trainer öffnet direkt die Ansicht (nur einmal, damit „wechseln“ weiter geht)
+    if (/^(spieler|trainer)$/.test(new URLSearchParams(location.search).get('demo') || '')) {
+      sessionStorage.setItem(DEMO_ROLE_KEY, DEMO_PARAM === 'spieler' ? 'player' : 'admin');
+      history.replaceState(null, '', `${location.pathname}?demo${location.hash}`);
+    }
     const role = sessionStorage.getItem(DEMO_ROLE_KEY);
     if (!role) return renderDemoLogin();
     Demo.role = role;
@@ -92,7 +99,7 @@ function renderNoAccess() {
 
 function renderDemoLogin() {
   renderFrame(`<h1>Demo ansehen</h1>
-    <p class="muted">Noch ist keine Datenbank verbunden. Du kannst beide Ansichten mit Beispieldaten ausprobieren – Änderungen bleiben nur in diesem Browser.</p>
+    <p class="muted">Vorschau mit Beispieldaten – echte Daten werden nicht angezeigt oder verändert. Änderungen bleiben nur in diesem Browser.</p>
     <div class="demo-pick">
       <button class="pick" data-role="player">${icon('user')}<strong>Als Spielerin</strong><span>Lena – Trainingsplan, Gewichte eintragen, Feedback</span></button>
       <button class="pick" data-role="admin">${icon('users')}<strong>Als Trainer</strong><span>Alex – alle Spieler, Pläne, Feedback, Inhalte</span></button>
@@ -238,7 +245,7 @@ async function renderProfile(view) {
     showInvite(name, code, 'Hi! Hier ist dein Trainer-Zugang für Athletik Remote:');
   };
   $('#logout').onclick = async () => {
-    if (DEMO) sessionStorage.removeItem(DEMO_ROLE_KEY); else await Auth.signOut();
+    if (DEMO) { sessionStorage.removeItem(DEMO_ROLE_KEY); if (DEMO_PARAM !== null) { location.href = location.pathname; return; } } else await Auth.signOut();
     App.me = null;
     location.hash = '';
     boot();
