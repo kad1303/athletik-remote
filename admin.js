@@ -236,10 +236,28 @@ const Admin = {
         }
         for (const x of plans.filter(x => x.active)) await DB.update('plans', x.id, { active: false });
         const plan = f.src.value ? await this.copyPlan(f.src.value, p.id, over) : await DB.insert('plans', { player_id: p.id, active: true, notes: '', ...over });
+        if (over.file_url) {
+          toast('Felder werden erkannt …');
+          const n = await this.autoFields(plan.id, over.file_url);
+          toast(n ? `${plural(n, 'Feld', 'Felder')} automatisch gesetzt` : 'Plan angelegt – Felder bitte von Hand setzen');
+        }
         closeSheet();
         location.hash = `#/plan/${plan.id}`;
       } catch (x) { toast(friendlyAuthError(x), 'err'); e.target.querySelector("[type=submit]").disabled = false; }
     };
+  },
+
+  // Ausfüllfelder auf einer frisch hochgeladenen PDF automatisch anlegen (nur wenn der Plan noch keine hat)
+  async autoFields(planId, url) {
+    try {
+      if ((await DB.list('pdf_fields', { plan_id: planId }, { select: 'id' })).length) return 0;
+      const found = await PdfView.detectUrl(url);
+      if (found.length) await DB.insert('pdf_fields', found.map(f => ({ id: uuid(), plan_id: planId, ...f })));
+      return found.length;
+    } catch (x) {
+      console.warn('Automatische Erkennung fehlgeschlagen', x);
+      return 0;
+    }
   },
 
   // Plan mit allen Tagen und Übungen kopieren (playerId null = als Vorlage)
@@ -256,7 +274,8 @@ const Admin = {
     if (newDays.length) await DB.insert('plan_days', newDays);
     const newExs = exs.map(e => ({ id: uuid(), day_id: map[e.day_id], sort: e.sort, name: e.name, sets: e.sets, reps: e.reps || '', load: e.load || '', rest: e.rest || '', notes: e.notes || '', video_url: e.video_url || '' }));
     if (newExs.length) await DB.insert('exercises', newExs);
-    const fields = src.file_url ? await DB.list('pdf_fields', { plan_id: srcId }) : [];
+    // Felder nur übernehmen, wenn die neue Kopie dieselbe PDF hat
+    const fields = src.file_url && plan.file_url === src.file_url ? await DB.list('pdf_fields', { plan_id: srcId }) : [];
     if (fields.length) await DB.insert('pdf_fields', fields.map(f => ({ id: uuid(), plan_id: plan.id, page: f.page, kind: f.kind, x: f.x, y: f.y, w: f.w, h: f.h })));
     return plan;
   },
@@ -467,7 +486,8 @@ const Admin = {
         toast('PDF wird hochgeladen …');
         try {
           S.plan.file_url = await DB.upload(`plaene/${uuid()}-${safeName(file.name)}`, file);
-          toast('PDF hochgeladen – jetzt noch speichern.');
+          if (!fieldCount) fieldCount = await this.autoFields(id, S.plan.file_url);
+          toast(`PDF hochgeladen${fieldCount ? `, ${plural(fieldCount, 'Feld', 'Felder')} gesetzt` : ''} – jetzt noch speichern.`);
           render();
           touch();
         } catch (x) { toast(friendlyAuthError(x), 'err'); }

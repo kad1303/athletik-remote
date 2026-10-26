@@ -32,6 +32,14 @@ const PdfView = {
     return lib.getDocument({ data: await res.arrayBuffer() }).promise;
   },
 
+  // Alle Seiten einer PDF durchsuchen
+  async detectUrl(url) {
+    const doc = await this.load(url);
+    let out = [];
+    for (let n = 1; n <= doc.numPages; n++) out = out.concat(await this.detect(await doc.getPage(n), n));
+    return out;
+  },
+
   /* Erkennt Ausfüllstellen in Tabellen-Plänen (z. B. Excel-Export):
      Zelle rechts neben einer Wiederholungsangabe („10ea“, „5“) → kg-Feld, bei „Explosiv“ ein Kreuz in der Wdh-Zelle;
      Zelle unter einer Circuit-Angabe („3x12x10''“) → Kreuz. Zellränder kommen aus den Linien der PDF. */
@@ -131,7 +139,7 @@ const PdfView = {
         const d = cellAt(it.cx, c.b + 0.9);
         if (!d || Math.abs(d.t - c.b) > 1.5 || Math.abs(d.l - c.l) > 1.5) continue;
         const txt = textIn(d);
-        if (!txt || /done|✓|erledigt/i.test(txt)) out.push({ ...rel(square(d, false), 'check'), circuit: true });
+        if (!txt || /done|✓|erledigt/i.test(txt)) out.push({ ...rel(square(d, true), 'check'), circuit: true });
       }
     }
     // Wochen-Spalten erkennen: in einer Zeile mindestens 3 Treffer direkt nebeneinander
