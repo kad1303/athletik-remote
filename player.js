@@ -14,17 +14,13 @@ const Player = {
   /* ---------- Start: Hallo, Woche Mo–Fr, Weg zum Plan ---------- */
   async home(view, live) {
     const plan = await this.activePlan();
-    const [fields, videos] = await Promise.all([
-      plan && plan.file_url ? DB.list('pdf_fields', { plan_id: plan.id }, { select: 'id' }) : [],
-      DB.list('content', { section: 'videos' }, { select: 'id' }),
-    ]);
+    const fields = plan && plan.file_url ? await DB.list('pdf_fields', { plan_id: plan.id }, { select: 'id' }) : [];
     const vals = fields.length ? await DB.list('pdf_values', { player_id: this.pid(), field_id: fields.map(f => f.id) }, { select: 'value,updated_at' }) : [];
     if (!live()) return;
     const today = Dates.today();
     const week = Dates.week(today).slice(0, 5);
     // Tage, an denen etwas in den Plan eingetragen wurde
     const active = new Set(vals.filter(v => v.value).map(v => Dates.iso(new Date(v.updated_at))));
-    const filled = vals.filter(v => v.value).length;
     const first = String(App.me.name || '').split(' ')[0];
     const hasPlan = plan && plan.file_url;
 
@@ -40,11 +36,9 @@ const Player = {
       ${hasPlan ? `<a class="start-card" href="#/plan">
           <span class="eyebrow">Dein Trainingsplan</span>
           <h2>${esc(plan.title)}</h2>
-          ${fields.length ? `<div class="mini-progress"><i style="width:${Math.round(filled / fields.length * 100)}%"></i></div><span class="small">${filled} von ${fields.length} Feldern ausgefüllt</span>` : ''}
           <span class="go">Hier geht's zu deinem Trainingsplan ${icon('next')}</span>
         </a>`
         : `<section class="card empty">${icon('file', 'big')}<h2>Dein Plan kommt gleich</h2><p class="muted">Alex lädt deinen Trainingsplan hier hoch.</p></section>`}
-      ${videos.length ? `<a class="card link-card" href="#/videos">${icon('play')}<span><strong>Trainingsvideos</strong><small class="muted">${plural(videos.length, 'Video', 'Videos')} von Alex</small></span>${icon('next')}</a>` : ''}
       ${hasPlan && plan.notes ? `<section class="card note"><h2>Hinweis von Alex</h2><p>${richText(plan.notes)}</p></section>` : ''}
     </div>`;
   },
@@ -71,7 +65,7 @@ const Player = {
     if (!live()) return;
     view.innerHTML = `<div class="page pdf-page-wrap">
       <header class="page-head">
-        <div><h1>${esc(plan.title)}</h1><p class="muted small">${fields.length ? 'Kästchen antippen zum Abhaken, kg-Felder antippen zum Eintragen.' : 'Dein Trainingsplan'}</p></div>
+        <div><h1>${esc(plan.title)}</h1></div>
         <span class="save-state" id="save-state"></span>
       </header>
       <div id="pdf-box" class="pdf-box"></div>
