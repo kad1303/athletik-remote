@@ -2,7 +2,7 @@
 
 /* ============================================================
    Trainer-Ansicht (Alex): Spieler, Spieler-Detail, Plan-Editor,
-   Feedback-Eingang, Vorlagen, Inhalte (Videos + Bonus).
+   Feedback beantworten, Trainingsvideos.
    ============================================================ */
 
 const MAX_UPLOAD_MB = 50;   // Grenze im kostenlosen Supabase-Tarif
@@ -15,7 +15,7 @@ const Admin = {
       pdf: (v, a, live) => this.pdfFilled(v, a[0], live),
       feedback: (v, a, live) => this.feedback(v, live),
       plaene: (v, a, live) => this.templates(v, live),
-      inhalte: (v, a, live) => this.content(v, a[0] || 'videos', live),
+      inhalte: (v, a, live) => this.content(v, 'videos', live),
     }[page];
   },
 
@@ -696,7 +696,7 @@ const Admin = {
     render();
   },
 
-  /* ---------- Inhalte: Videos + Bonus ---------- */
+  /* ---------- Trainingsvideos ---------- */
   async content(view, section, live) {
     const [items, players] = await Promise.all([
       DB.list('content', { section }, { order: 'category,sort,-created_at' }),
@@ -709,9 +709,8 @@ const Admin = {
     const groups = {};
     items.forEach(c => (groups[c.category || 'Allgemein'] = groups[c.category || 'Allgemein'] || []).push(c));
     view.innerHTML = `<div class="page narrow">
-      <header class="page-head"><div><h1>Trainingsvideos</h1><p class="muted">Videos für Technik & Übungen, unter „Bonus“ alles Zusätzliche.</p></div>
-        <button class="btn primary" id="add">${icon('plus')} Inhalt</button></header>
-      <div class="seg"><a href="#/inhalte/videos" class="${section === 'videos' ? 'on' : ''}">Videos</a><a href="#/inhalte/bonus" class="${section === 'bonus' ? 'on' : ''}">Bonus</a></div>
+      <header class="page-head"><div><h1>Trainingsvideos</h1><p class="muted">Videos für Technik & Übungen – die Spieler finden sie im Reiter „Videos“.</p></div>
+        <button class="btn primary" id="add">${icon('plus')} Video</button></header>
       ${Object.entries(groups).map(([cat, list]) => `<section><h2 class="group-title">${esc(cat)}</h2><div class="content-list">${list.map(c => contentCard(c, tools(c))).join('')}</div></section>`).join('')
         || '<section class="card empty"><p class="muted">Noch nichts hochgeladen.</p></section>'}
     </div>`;
@@ -730,15 +729,14 @@ const Admin = {
   editContent(c, items, players) {
     const cats = [...new Set(items.map(x => x.category).filter(Boolean))];
     const aud = c.audience || [];
-    const s = openSheet(`<h2>${c.id ? 'Inhalt bearbeiten' : 'Neuer Inhalt'}</h2>
+    const s = openSheet(`<h2>${c.id ? 'Video bearbeiten' : 'Neues Video'}</h2>
       <form class="form" id="cf">
-        <div class="seg small"><label><input type="radio" name="section" value="videos" ${c.section === 'videos' ? 'checked' : ''}> Videos</label><label><input type="radio" name="section" value="bonus" ${c.section === 'bonus' ? 'checked' : ''}> Bonus</label></div>
         <label>Titel<input name="title" value="${esc(c.title || '')}" required></label>
         <label>Kategorie<input name="category" value="${esc(c.category || '')}" list="cats" placeholder="z. B. Technik, Aufwärmen, Ernährung"></label>
         <datalist id="cats">${cats.map(x => `<option>${esc(x)}</option>`).join('')}</datalist>
         <label>Text (optional)<textarea name="body" rows="4">${esc(c.body || '')}</textarea></label>
         <label>Link (YouTube, Vimeo, Webseite …)<input name="url" value="${esc(c.url && !c.url.startsWith('file:') ? c.url : '')}" placeholder="https://"></label>
-        <label class="btn block upload-btn">${icon('upload')} <span id="fname">${c.url && c.url.startsWith('file:') ? esc(c.url.split('/').pop().replace(/^[\w-]{36}-/, '')) : `Oder Datei hochladen (Video, PDF, Bild · max. ${MAX_UPLOAD_MB} MB)`}</span><input type="file" name="file" hidden></label>
+        <label class="btn block upload-btn">${icon('upload')} <span id="fname">${c.url && c.url.startsWith('file:') ? esc(c.url.split('/').pop().replace(/^[\w-]{36}-/, '')) : `Oder Video hochladen (max. ${MAX_UPLOAD_MB} MB)`}</span><input type="file" name="file" accept="video/*" hidden></label>
         <fieldset class="aud"><legend>Sichtbar für</legend>
           <label class="check-line"><input type="radio" name="aud" value="all" ${aud.length ? '' : 'checked'}> Alle Spieler</label>
           <label class="check-line"><input type="radio" name="aud" value="some" ${aud.length ? 'checked' : ''}> Nur bestimmte</label>
@@ -762,19 +760,19 @@ const Admin = {
         let url = el.url.value.trim() || (c.url && c.url.startsWith('file:') ? c.url : '');
         if (file) {
           toast('Lädt hoch …');
-          url = await DB.upload(`${el.section.value}/${uuid()}-${safeName(file.name)}`, file);
+          url = await DB.upload(`videos/${uuid()}-${safeName(file.name)}`, file);
           if (c.url && c.url.startsWith('file:')) await DB.removeFile(c.url.slice(5));
         }
         const who = $$('input[name=who]:checked', f).map(x => x.value);
         const row = {
-          section: el.section.value, title: el.title.value.trim(), category: el.category.value.trim() || null,
+          section: 'videos', title: el.title.value.trim(), category: el.category.value.trim() || null,
           body: el.body.value.trim(), url: url || null, audience: el.aud.value === 'some' && who.length ? who : null,
         };
         if (c.id) await DB.update('content', c.id, row);
         else await DB.insert('content', row);
         closeSheet();
         toast('Gespeichert');
-        if (location.hash !== `#/inhalte/${row.section}`) location.hash = `#/inhalte/${row.section}`; else route();
+        route();
       } catch (x) { toast(friendlyAuthError(x), 'err'); e.target.querySelector("[type=submit]").disabled = false; }
     };
   },

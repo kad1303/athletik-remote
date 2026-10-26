@@ -183,7 +183,7 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; accent-colo
 .avatar.sm { width: 30px; height: 30px; font-size: 0.78rem; }
 .avatar.lg { width: 52px; height: 52px; font-size: 1rem; }
 .person { display: flex; align-items: center; gap: 12px; }
-.person span { display: block; }
+.person > div > span { display: block; }
 
 /* ---------- Spieler: Startseite ---------- */
 .date-line { font-weight: 700; color: var(--ink-2); margin: 4px 2px -4px; font-size: 0.9rem; }

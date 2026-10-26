@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '5';
+const APP_VERSION = '6';
 
 const DEMO = !Auth.configured();
 const DB = DEMO ? Demo.load() : Remote;
@@ -16,8 +16,8 @@ const DEMO_ROLE_KEY = 'athletik:demo-role';
 const App = { me: null, badge: 0 };
 
 const TABS = {
-  player: [['heute', 'home', 'Heute'], ['videos', 'play', 'Videos'], ['bonus', 'star', 'Bonus'], ['verlauf', 'chart', 'Verlauf'], ['profil', 'user', 'Profil']],
-  admin: [['spieler', 'users', 'Spieler'], ['feedback', 'msg', 'Feedback'], ['inhalte', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
+  player: [['heute', 'home', 'Heute'], ['videos', 'play', 'Videos'], ['verlauf', 'chart', 'Verlauf'], ['profil', 'user', 'Profil']],
+  admin: [['spieler', 'users', 'Spieler'], ['inhalte', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
 };
 
 function inviteUrl(code) { return `${location.origin}${location.pathname}#einladung=${code}`; }
