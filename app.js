@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '9';
+const APP_VERSION = '10';
 
 // Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
 const DEMO_PARAM = new URLSearchParams(location.search).get('demo');
@@ -72,7 +72,7 @@ async function boot() {
 
 function renderFrame(inner) {
   $('#app').innerHTML = `<main class="auth-wrap"><div class="auth-card">
-    <div class="brand-big"><span class="logo">AR</span><div><strong>Athletik Remote</strong><span>SK Fitness Base</span></div></div>
+    <div class="brand-big"><img class="brand-logo" src="icons/logo-skfb.png" alt="SK Fitness Base"><span>Athletiktraining Remote</span></div>
     ${inner}</div></main>`;
 }
 
@@ -102,7 +102,7 @@ function renderDemoLogin() {
     <p class="muted">Vorschau mit Beispieldaten – echte Daten werden nicht angezeigt oder verändert. Änderungen bleiben nur in diesem Browser.</p>
     <div class="demo-pick">
       <button class="pick" data-role="player">${icon('user')}<strong>Als Spielerin</strong><span>Lena – Plan als PDF ausfüllen, Trainingsvideos</span></button>
-      <button class="pick" data-role="admin">${icon('users')}<strong>Als Trainer</strong><span>Alex – alle Spieler, Pläne, Feedback, Inhalte</span></button>
+      <button class="pick" data-role="admin">${icon('users')}<strong>Als Trainer</strong><span>Alex – alle Spieler, Pläne, Trainingsvideos</span></button>
     </div>`);
   $$('.pick').forEach(b => b.onclick = () => { sessionStorage.setItem(DEMO_ROLE_KEY, b.dataset.role); location.hash = ''; boot(); });
 }
@@ -167,7 +167,7 @@ function startShell() {
     ${DEMO ? `<div class="demo-bar">Demo-Modus · ${App.me.role === 'admin' ? 'Trainer-Ansicht' : 'Spieler-Ansicht'} <button class="link-btn" id="demo-switch">wechseln</button></div>` : ''}
     <div class="shell">
       <nav class="tabbar" aria-label="Hauptmenü">
-        <div class="tab-brand"><span class="logo">AR</span><strong>Athletik Remote</strong></div>
+        <div class="tab-brand"><img class="brand-logo" src="icons/logo-skfb.png" alt="SK Fitness Base"></div>
         ${tabs.map(([id, ic, label]) => `<a href="#/${id}" class="tab" data-tab="${id}">${icon(ic)}<span>${label}</span>${id === 'feedback' ? '<i class="badge" id="fb-badge" hidden></i>' : ''}</a>`).join('')}
       </nav>
       <main id="view" class="view"></main>

@@ -1,10 +1,10 @@
 // Service Worker: holt die App immer frisch aus dem Netz (damit Updates sofort ankommen)
 // und fällt nur ohne Netz auf die gespeicherte Kopie zurück.
 // Trainingsdaten werden NICHT gespeichert – Anfragen an Supabase laufen am Service Worker vorbei.
-const CACHE = 'athletik-v10';
+const CACHE = 'athletik-v11';
 const ASSETS = [
   './', './index.html', './styles.css', './config.js', './auth.js', './demo.js', './ui.js', './player.js', './pdfview.js', './admin.js', './app.js',
-  './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png',
+  './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/logo-skfb.png',
 ];
 const NETWORK_TIMEOUT_MS = 4000;
 

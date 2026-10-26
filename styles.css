@@ -112,9 +112,11 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; accent-colo
 /* ---------- Anmeldung ---------- */
 .auth-wrap { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
 .auth-card { width: 100%; max-width: 420px; display: grid; gap: 18px; }
-.brand-big { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-.brand-big strong { display: block; font-size: 1.15rem; font-weight: 800; font-stretch: 88%; }
-.brand-big span { color: var(--muted); font-size: 0.85rem; }
+.brand-big { display: grid; justify-items: start; gap: 8px; margin-bottom: 8px; }
+.brand-big .brand-logo { height: 26px; }
+.brand-big span { color: var(--muted); font-size: 0.8rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.brand-logo { display: block; width: auto; max-width: 100%; }
+.page-logo { display: block; height: 20px; width: auto; max-width: 70%; margin: 4px 0 2px; }
 .logo { width: 44px; height: 44px; border-radius: 12px; background: var(--ink); color: var(--page); display: grid; place-items: center; font-weight: 800; font-size: 15px; letter-spacing: 0.02em; flex: none; font-stretch: 80%; }
 .form { display: grid; gap: 12px; }
 .form label { display: grid; gap: 5px; font-size: 0.85rem; font-weight: 600; color: var(--ink-2); }
@@ -149,9 +151,9 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; accent-colo
 @media (min-width: 900px) {
   .shell { display: grid; grid-template-columns: 220px 1fr; }
   .tabbar { position: sticky; top: 0; height: 100dvh; flex-direction: column; justify-content: flex-start; gap: 4px; padding: 20px 12px; border-top: 0; border-right: 1px solid var(--line); background: var(--card); }
-  .tab-brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 20px; }
-  .tab-brand .logo { width: 36px; height: 36px; font-size: 13px; border-radius: 10px; }
-  .tab-brand strong { font-stretch: 88%; font-weight: 800; }
+  .tab-brand { display: flex; align-items: center; padding: 6px 8px 24px; }
+  .tab-brand .brand-logo { height: 15px; }
+  .page-logo { display: none; }
   .tab { flex: none; max-width: none; display: flex; align-items: center; gap: 12px; padding: 10px 12px; font-size: 0.92rem; }
   .tab.active { background: var(--accent-wash); }
   .badge { position: static; margin-left: auto; }

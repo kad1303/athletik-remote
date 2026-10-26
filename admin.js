@@ -648,7 +648,7 @@ const Admin = {
     const tools = c => `<div class="cc-tools">${c.audience && c.audience.length ? `<span class="pill" title="${esc(c.audience.map(nameOf).join(', '))}">${plural(c.audience.length, 'Spieler', 'Spieler')}</span>` : '<span class="pill">alle</span>'}
       <button class="icon-btn sm" data-edit="${c.id}" aria-label="Bearbeiten">${icon('edit')}</button><button class="icon-btn sm" data-del="${c.id}" aria-label="Löschen">${icon('trash')}</button></div>`;
     view.innerHTML = `<div class="page narrow">
-      <header class="page-head"><div><h1>Trainingsvideos</h1><p class="muted">Videos für Technik & Übungen – die Spieler finden sie im Reiter „Videos“.</p></div>
+      <header class="page-head"><div><h1>Trainingsvideos</h1></div>
         <button class="btn primary" id="add">${icon('plus')} Video</button></header>
       ${items.length ? `<div class="content-list">${items.map(c => contentCard(c, tools(c))).join('')}</div>` : '<section class="card empty"><p class="muted">Noch keine Videos hochgeladen.</p></section>'}
     </div>`;
