@@ -8,7 +8,7 @@ const PAGE_LOGO = '<img class="page-logo" src="icons/logo-skfb.png" alt="SK Fitn
 
 const Player = {
   route(page) {
-    return { start: (v, a, live) => this.home(v, live), plan: (v, a, live) => this.plan(v, live), videos: (v, a, live) => this.videos(v, live) }[page];
+    return { start: (v, a, live) => this.home(v, live), plan: (v, a, live) => a[0] === 'videos' ? this.planVideos(v, live) : this.plan(v, live), videos: (v, a, live) => this.videos(v, live) }[page];
   },
 
   /* ---------- Start: Hallo, Woche Mo–Fr, Weg zum Plan ---------- */
@@ -49,6 +49,36 @@ const Player = {
     return plan || null;
   },
 
+  // Umschalter im Reiter Plan: PDF ↔ Videos zu den Übungen im Plan
+  planTabs(on) {
+    return `<div class="seg"><a href="#/plan" class="${on === 'plan' ? 'on' : ''}">Plan</a><a href="#/plan/videos" class="${on === 'videos' ? 'on' : ''}">Videos zum Plan</a></div>`;
+  },
+
+  /* ---------- Videos zum Plan: Abgleich Übungen in der PDF ↔ Video-Datenbank ---------- */
+  async planVideos(view, live) {
+    const plan = await this.activePlan();
+    if (!live()) return;
+    if (!plan || !plan.file_url) { location.hash = '#/plan'; return; }
+    view.innerHTML = `<div class="page narrow">
+      <header class="page-head"><div><h1>${esc(plan.title)}</h1></div></header>
+      ${this.planTabs('videos')}
+      <div id="pv"><div class="spinner"></div></div>
+    </div>`;
+    const [videos, exercises] = await Promise.all([
+      DB.list('content', { section: 'videos' }, { order: 'sort,-created_at' }),
+      PlanVideos.exercises(plan.file_url),
+    ]);
+    if (!live()) return;
+    const hits = PlanVideos.match(exercises, videos).filter(m => m.video);
+    $('#pv').innerHTML = hits.length
+      ? `<div class="content-list">${hits.map(m => `<article class="card content-card">
+          <div class="cc-head"><h3>${esc(m.name)}</h3></div>
+          <button class="chip-btn" data-video="${esc(m.video.url)}" data-title="${esc(m.video.title)}">${icon('play')} ${esc(m.video.title)}</button>
+        </article>`).join('')}</div>`
+      : `<section class="card empty">${icon('play', 'big')}<p class="muted">Zu den Übungen in deinem Plan gibt es noch keine Videos.</p></section>`;
+    bindContent(view);
+  },
+
   /* ---------- Plan: die PDF von Alex, Kreuze und Gewichte direkt eintragen ---------- */
   async plan(view, live) {
     const plan = await this.activePlan();
@@ -67,6 +97,7 @@ const Player = {
         <div><h1>${esc(plan.title)}</h1></div>
         <span class="save-state" id="save-state"></span>
       </header>
+      ${this.planTabs('plan')}
       <div id="pdf-box" class="pdf-box"></div>
     </div>`;
     const saveState = $('#save-state');

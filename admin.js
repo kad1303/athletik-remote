@@ -397,6 +397,24 @@ const Admin = {
     ]);
     const exs = await DB.list('exercises', { day_id: days.map(d => d.id) }, { order: 'sort' });
     let fieldCount = plan.file_url ? (await DB.list('pdf_fields', { plan_id: id }, { select: 'id' })).length : 0;
+    // Abgleich Übungen in der PDF ↔ Trainingsvideos (läuft im Hintergrund)
+    let pvHtml = '<div class="spinner"></div>';
+    const computeVideos = async () => {
+      if (!S.plan.file_url) return;
+      try {
+        const [videos, exercises] = await Promise.all([DB.list('content', { section: 'videos' }), PlanVideos.exercises(S.plan.file_url)]);
+        const list = PlanVideos.match(exercises, videos);
+        const n = list.filter(m => m.video).length;
+        pvHtml = list.length ? `<p class="muted small">${n} von ${plural(list.length, 'Übung', 'Übungen')} haben ein Video. Zugeordnet wird über den Videotitel – z. B. „Trap Bar Deadlift“ passt zu „TRAP BAR DL“.</p>
+          <ul class="pv-list">${list.map(m => `<li class="${m.video ? 'ok' : ''}">${m.video ? icon('check') : '<span class="st open"></span>'}<span><strong>${esc(m.name)}</strong>${m.video ? `<small class="muted">${esc(m.video.title)}</small>` : '<small class="muted">noch kein Video</small>'}</span></li>`).join('')}</ul>`
+          : '<p class="muted small">In der PDF wurden keine Übungsnamen gefunden.</p>';
+      } catch (x) {
+        console.warn(x);
+        pvHtml = '<p class="muted small">Abgleich hat nicht geklappt.</p>';
+      }
+      const el = $('#pv-admin', view);
+      if (el) el.innerHTML = pvHtml;
+    };
     if (!live()) return;
 
     const S = {
@@ -457,6 +475,10 @@ const Admin = {
             : '<p class="muted small">Optional: Lade deinen fertigen Plan als PDF hoch. Danach setzt du Felder darauf, in die der Spieler Kreuze und Gewichte einträgt.</p>'}
           <label class="btn block upload-btn">${icon('upload')} ${S.plan.file_url ? 'Andere PDF hochladen (Felder werden neu erkannt)' : 'PDF hochladen'}<input type="file" id="pdf-up" accept="application/pdf,.pdf" hidden></label>
         </section>
+        ${S.plan.file_url ? `<section class="card">
+          <div class="card-head"><h2>Videos zum Plan</h2></div>
+          <div id="pv-admin">${pvHtml}</div>
+        </section>` : ''}
         <div class="save-bar"><span class="muted small" id="dirty-text">${dirty ? 'Ungespeicherte Änderungen' : 'Alles gespeichert'}</span>
           <button class="btn primary" id="save" ${dirty ? '' : 'disabled'}>Speichern</button></div>
       </div>`;
@@ -477,6 +499,7 @@ const Admin = {
           fieldCount = await this.autoFields(id, S.plan.file_url);
           toast(`PDF hochgeladen${fieldCount ? `, ${plural(fieldCount, 'Feld', 'Felder')} automatisch gesetzt` : ''}`);
           render();
+          computeVideos();
         } catch (x) { toast(friendlyAuthError(x), 'err'); }
       };
     };
@@ -626,6 +649,7 @@ const Admin = {
     App.guard = { hash: `#/plan/${id}`, ok: () => !dirty || confirm('Änderungen am Plan sind noch nicht gespeichert. Trotzdem verlassen?') };
 
     render();
+    computeVideos();
   },
 
   /* ---------- Trainingsvideos ---------- */

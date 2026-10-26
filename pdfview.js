@@ -25,11 +25,18 @@ const PdfView = {
     return pdfjsLib;
   },
 
-  async load(url) {
-    const lib = await this.lib();
-    const res = await fetch(await Media.href(url));
-    if (!res.ok) throw new Error('PDF nicht gefunden.');
-    return lib.getDocument({ data: await res.arrayBuffer() }).promise;
+  // Jede PDF nur einmal laden (Anzeige und Video-Abgleich teilen sich das Dokument)
+  docs: {},
+  load(url) {
+    if (!this.docs[url]) {
+      this.docs[url] = (async () => {
+        const lib = await this.lib();
+        const res = await fetch(await Media.href(url));
+        if (!res.ok) throw new Error('PDF nicht gefunden.');
+        return lib.getDocument({ data: await res.arrayBuffer() }).promise;
+      })().catch(e => { delete this.docs[url]; throw e; });
+    }
+    return this.docs[url];
   },
 
   // Alle Seiten einer PDF durchsuchen
@@ -411,5 +418,62 @@ const PdfView = {
     const onResize = () => { clearTimeout(rt); rt = setTimeout(() => { if (box.isConnected) render(); else window.removeEventListener('resize', onResize); }, 250); };
     window.addEventListener('resize', onResize);
     return { redraw: drawFields };
+  },
+};
+
+/* ============================================================
+   Abgleich Plan ↔ Video-Datenbank: Übungsnamen aus der Plan-PDF lesen
+   und passende Trainingsvideos (nach Titel) zuordnen.
+   ============================================================ */
+const PlanVideos = {
+  // Überschriften und Tabellenköpfe, die keine Übungen sind
+  SKIP: /^(EXPL\.?|TOTAL SCORE:?|ASLR|TSPU|ILL|RS|SM|HS|DS|FMS.*|STRENGTH BLOCK.*|POWER & ROTATIONAL BLOCK|CIRCUIT BLOCK.*|MOVEMENT LIGHTS|ATHLETE'S GOALS|(OFF|IN|PRE) SEASON|FOUNDATION|INDIVIDUAL PRIME&PREP|PREP|DAY \d+|DATE|PRIORITY.*|.*RE-TEST.*|TEAM|PERIOD|PHASE|MESOCYCLE|MRE|SE)$/,
+
+  // Übungsnamen = Texte in Großbuchstaben (Klammer-Zusätze wie „(5x)“ zählen nicht)
+  async exercises(url) {
+    const doc = await PdfView.load(url);
+    const seen = new Map();
+    for (let n = 1; n <= doc.numPages; n++) {
+      const tc = await (await doc.getPage(n)).getTextContent();
+      for (const it of tc.items) {
+        const name = it.str.replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
+        if (name.length < 4 || !/[A-ZÄÖÜ]{3}/.test(name) || name !== name.toUpperCase() || this.SKIP.test(name)) continue;
+        const key = this.tokens(name).join(' ');
+        if (key && !seen.has(key)) seen.set(key, name);
+      }
+    }
+    return [...seen.values()];
+  },
+
+  tokens(s) {
+    return String(s).toLowerCase()
+      .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+      .replace(/1\/2/g, ' halb ').replace(/(\d)\s*-\s*(?=[a-z])/g, '$1')
+      // gleiche Bedeutung, andere Schreibweise
+      .replace(/halb\s*knie?end|half\s*kneeling/g, 'halb kn').replace(/\b(kniend|kneeling)\b/g, 'kn')
+      .replace(/single\s*leg|einbeinig/g, '1leg').replace(/single\s*arm|einarmig/g, '1arm')
+      .replace(/deadlift|kreuzheben/g, 'dl').replace(/kettlebell/g, 'kb').replace(/medi(zin)?ball|med\s*ball/g, 'mb')
+      .replace(/cabel/g, 'cable').replace(/hamsring/g, 'hamstring').replace(/kopenhagen/g, 'copenhagen')
+      .replace(/[^a-z0-9]+/g, ' ').split(' ')
+      .filter(t => t && !['the', 'und', 'mit', 'w', 'an', 'am', 'der', 'die', 'das', 'video', 'technik', 'uebung'].includes(t));
+  },
+
+  // Video passt, wenn der Videotitel als zusammenhängende Wortfolge im Übungsnamen steht (oder umgekehrt), mind. 2 Wörter bzw. exakt gleich
+  match(exercises, videos) {
+    const vids = videos.filter(v => v.url).map(v => ({ v, t: this.tokens(v.title) }));
+    return exercises.map(name => {
+      const e = this.tokens(name);
+      let best = null, score = 0;
+      for (const { v, t } of vids) {
+        if (!t.length) continue;
+        const same = t.join(' ') === e.join(' ');
+        const has = (a, b) => ` ${a.join(' ')} `.includes(` ${b.join(' ')} `);
+        const vInE = t.length >= 2 && has(e, t);
+        const eInV = e.length >= 2 && has(t, e);
+        const s = same ? 100 : vInE ? t.length : eInV ? e.length : 0;
+        if (s > score) { score = s; best = v; }
+      }
+      return { name, video: best };
+    });
   },
 };

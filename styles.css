@@ -459,3 +459,13 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .link-card { display: flex; align-items: center; gap: 14px; text-decoration: none; color: inherit; }
 .link-card > .ic:first-child { width: 28px; height: 28px; color: var(--accent); }
 .link-card span { flex: 1; display: grid; }
+
+/* ---------- Videos zum Plan (Trainer) ---------- */
+.pv-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.pv-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.pv-list li:first-child { border-top: 0; }
+.pv-list li > .ic { width: 20px; height: 20px; color: var(--done); stroke-width: 2.6; flex: none; }
+.pv-list li > .st { width: 20px; height: 20px; }
+.pv-list li span:last-child { display: grid; min-width: 0; }
+.pv-list strong { font-size: 0.9rem; }
+.seg + .pdf-box, .page > .seg { justify-self: start; }
