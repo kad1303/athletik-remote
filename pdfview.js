@@ -118,9 +118,9 @@ const PdfView = {
     for (const it of items) {
       if (/^\d{1,2}\s*(ea|x)?$/i.test(it.s)) {
         const c = cellAt(it.cx, it.cy);
-        if (!c || c.r - c.l > 60) continue;
+        if (!c || c.r - c.l > W * 0.18) continue;
         const v = cellAt(c.r + 0.9, it.cy);
-        if (!v || v.r - v.l > 60 || Math.abs(v.t - c.t) > 1.5 || colored(c) || colored(v)) continue;
+        if (!v || v.r - v.l > W * 0.18 || Math.abs(v.t - c.t) > 1.5 || colored(c) || colored(v)) continue;
         const txt = textIn(v);
         const row = { key: `${n}|${Math.round(c.t)}`, at: c.l, pitch: (v.r - c.l) * 1.25 };
         if (/explosiv|✓|done/i.test(txt)) out.push({ ...rel(square(c, true), 'check'), ...row });

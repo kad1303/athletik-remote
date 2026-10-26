@@ -16,7 +16,7 @@ const Demo = {
 
   load() {
     try { this.db = JSON.parse(localStorage.getItem(DEMO_KEY)); } catch { this.db = null; }
-    if (!this.db || this.db.v !== 3) this.db = this.seed();
+    if (!this.db || this.db.v !== 5) this.db = this.seed();
     return this;
   },
 
@@ -189,7 +189,7 @@ const Demo = {
       return plan;
     };
     const kraft = {
-      notes: 'Vor jeder Einheit 10 Min. Aufwärmen (Seilspringen, Mobility). Bei Schmerzen abbrechen und im Feedback schreiben.',
+      notes: 'Vor jeder Einheit 10 Min. Aufwärmen (Seilspringen, Mobility). Bei Schmerzen abbrechen und Alex Bescheid geben.',
       days: [
         { wd: 1, title: 'Kraft Unterkörper', ex: [['Kniebeuge', 4, '6', '60 kg', '2 min', 'Tiefe bis Parallele, Knie stabil'], ['Rumänisches Kreuzheben', 3, '8', '50 kg', '90 s'], ['Bulgarian Split Squat', 3, '8 je Seite', '2× 12 kg', '90 s'], ['Wadenheben einbeinig', 3, '12', 'Körpergewicht', '60 s']] },
         { wd: 3, title: 'Schnelligkeit & Sprungkraft', notes: 'Volle Pause zwischen den Sätzen – Qualität vor Menge.', ex: [['Box Jumps', 4, '5', '', '90 s'], ['Seitliche Sprünge (Skater)', 3, '6 je Seite'], ['Sprints 10 m', 6, '1', '', '60 s'], ['Medizinball Rotationswurf', 3, '6 je Seite', '3 kg']] },
@@ -199,6 +199,13 @@ const Demo = {
     };
     const lenaPlan = addPlan(P.lena, 'Wintervorbereitung Block 1', 17, 6, kraft);
     addPlan(P.jonas, 'Turniervorbereitung', 10, 4, kraft);
+
+    // Plan als PDF (Muster) mit automatisch erkannten Feldern; Woche 1 schon ausgefüllt
+    lenaPlan.file_url = 'demo/musterplan.pdf';
+    lenaPlan.title = 'Musterplan Block 1';
+    const pdf_fields = [["c",0.3109,0.1602,0.0159,0.0225],["c",0.4926,0.1602,0.0159,0.0225],["c",0.6743,0.1602,0.0159,0.0225],["c",0.8561,0.1602,0.0159,0.0225],["c",0.3109,0.1871,0.0159,0.0225],["c",0.4926,0.1871,0.0159,0.0225],["c",0.6743,0.1871,0.0159,0.0225],["c",0.8561,0.1871,0.0159,0.0225],["c",0.3109,0.2139,0.0159,0.0225],["c",0.4926,0.2139,0.0159,0.0225],["c",0.6743,0.2139,0.0159,0.0225],["c",0.8561,0.2139,0.0159,0.0225],["k",0.3296,0.284,0.0885,0.0235],["k",0.5113,0.284,0.0885,0.0235],["k",0.693,0.284,0.0885,0.0235],["k",0.8747,0.284,0.0885,0.0235],["k",0.3296,0.3109,0.0885,0.0235],["k",0.5113,0.3109,0.0885,0.0235],["k",0.693,0.3109,0.0885,0.0235],["k",0.8747,0.3109,0.0885,0.0235],["k",0.3296,0.3378,0.0885,0.0235],["k",0.5113,0.3378,0.0885,0.0235],["k",0.693,0.3378,0.0885,0.0235],["k",0.8747,0.3378,0.0885,0.0235],["k",0.3296,0.4084,0.0885,0.0235],["k",0.5113,0.4084,0.0885,0.0235],["k",0.693,0.4084,0.0885,0.0235],["k",0.8747,0.4084,0.0885,0.0235],["k",0.3296,0.4353,0.0885,0.0235],["k",0.5113,0.4353,0.0885,0.0235],["k",0.693,0.4353,0.0885,0.0235],["k",0.8747,0.4353,0.0885,0.0235],["k",0.3296,0.4622,0.0885,0.0235],["k",0.5113,0.4622,0.0885,0.0235],["k",0.693,0.4622,0.0885,0.0235],["k",0.8747,0.4622,0.0885,0.0235],["k",0.3296,0.5328,0.0885,0.0235],["k",0.5113,0.5328,0.0885,0.0235],["k",0.693,0.5328,0.0885,0.0235],["k",0.8747,0.5328,0.0885,0.0235],["k",0.3296,0.5597,0.0885,0.0235],["k",0.5113,0.5597,0.0885,0.0235],["k",0.693,0.5597,0.0885,0.0235],["k",0.8747,0.5597,0.0885,0.0235],["k",0.3296,0.5866,0.0885,0.0235],["k",0.5113,0.5866,0.0885,0.0235],["k",0.693,0.5866,0.0885,0.0235],["k",0.8747,0.5866,0.0885,0.0235],["c",0.2391,0.6845,0.0159,0.0225],["c",0.4208,0.6845,0.0159,0.0225],["c",0.6025,0.6845,0.0159,0.0225],["c",0.7842,0.6845,0.0159,0.0225],["c",0.2391,0.7383,0.0159,0.0225],["c",0.4208,0.7383,0.0159,0.0225],["c",0.6025,0.7383,0.0159,0.0225],["c",0.7842,0.7383,0.0159,0.0225]].map(([k, x, y, w, h]) => ({ id: id(), plan_id: lenaPlan.id, page: 1, kind: k === 'c' ? 'check' : 'kg', x, y, w, h }));
+    const kgWeek1 = ['60', '62,5', '62,5', '50', '50', '52,5', '16', '16', '16'];
+    const pdf_values = pdf_fields.filter(f => f.x < 0.42).map(f => ({ field_id: f.id, player_id: P.lena, value: f.kind === 'check' ? 'x' : kgWeek1.shift(), updated_at: ago(3) }));
     addPlan(null, 'Grundlagen Kraft (3×/Woche)', 60, 6, kraft);
 
     // Einträge von Lena: letzte Woche komplett, diese Woche bis gestern
@@ -234,8 +241,8 @@ const Demo = {
     ];
 
     return {
-      v: 3,
-      players, invites, plans, plan_days: days, exercises, logs, feedback, content,
+      v: 5,
+      players, invites, plans, plan_days: days, exercises, logs, feedback, content, pdf_fields, pdf_values,
       members: [
         { user_id: 'demo-admin', name: 'Alex', role: 'admin', player_id: null },
         { user_id: 'demo-player', name: 'Lena Hoffmann', role: 'player', player_id: P.lena },

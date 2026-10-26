@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '7';
+const APP_VERSION = '8';
 
 // Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
 const DEMO_PARAM = new URLSearchParams(location.search).get('demo');
@@ -18,7 +18,7 @@ const DEMO_ROLE_KEY = 'athletik:demo-role';
 const App = { me: null, badge: 0 };
 
 const TABS = {
-  player: [['heute', 'home', 'Heute'], ['videos', 'play', 'Videos'], ['verlauf', 'chart', 'Verlauf'], ['profil', 'user', 'Profil']],
+  player: [['plan', 'file', 'Plan'], ['videos', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
   admin: [['spieler', 'users', 'Spieler'], ['inhalte', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
 };
 
@@ -101,7 +101,7 @@ function renderDemoLogin() {
   renderFrame(`<h1>Demo ansehen</h1>
     <p class="muted">Vorschau mit Beispieldaten – echte Daten werden nicht angezeigt oder verändert. Änderungen bleiben nur in diesem Browser.</p>
     <div class="demo-pick">
-      <button class="pick" data-role="player">${icon('user')}<strong>Als Spielerin</strong><span>Lena – Trainingsplan, Gewichte eintragen, Feedback</span></button>
+      <button class="pick" data-role="player">${icon('user')}<strong>Als Spielerin</strong><span>Lena – Plan als PDF ausfüllen, Trainingsvideos</span></button>
       <button class="pick" data-role="admin">${icon('users')}<strong>Als Trainer</strong><span>Alex – alle Spieler, Pläne, Feedback, Inhalte</span></button>
     </div>`);
   $$('.pick').forEach(b => b.onclick = () => { sessionStorage.setItem(DEMO_ROLE_KEY, b.dataset.role); location.hash = ''; boot(); });
@@ -188,8 +188,8 @@ async function route() {
   }
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   const admin = App.me.role === 'admin';
-  const page = parts[0] || (admin ? 'spieler' : 'heute');
-  const tab = { tag: 'heute', plan: 'spieler', pdf: admin ? 'spieler' : 'heute' }[page] || page;
+  const page = parts[0] || (admin ? 'spieler' : 'plan');
+  const tab = (admin ? { plan: 'spieler', pdf: 'spieler' } : {})[page] || page;
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   const view = $('#view');
   const seq = ++routeSeq;
@@ -199,7 +199,7 @@ async function route() {
   view.classList.remove('dirty');
   try {
     const handler = page === 'profil' ? renderProfile : admin ? Admin.route(page) : Player.route(page);
-    if (!handler) { location.hash = admin ? '#/spieler' : '#/heute'; return; }
+    if (!handler) { location.hash = admin ? '#/spieler' : '#/plan'; return; }
     await handler(view, parts.slice(1), () => seq === routeSeq);
     if (seq === routeSeq) window.scrollTo(0, 0);
   } catch (e) {

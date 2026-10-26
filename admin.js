@@ -30,38 +30,28 @@ const Admin = {
 
   /* ---------- Spielerliste ---------- */
   async players(view, live) {
-    const today = Dates.today();
-    const week = Dates.week(today);
-    const [players, plans, invites, logs, unseen] = await Promise.all([
+    const [players, plans, invites] = await Promise.all([
       DB.list('players', {}, { order: 'name' }),
       DB.list('plans', { active: true, player_id: { not: 'is.null' } }),
       DB.list('invites', { used_at: null, role: 'player' }),
-      DB.list('logs', { date: { gte: Dates.add(today, -60) } }, { select: 'player_id,day_id,date,done', order: '-date' }),
-      DB.list('feedback', { coach_seen: false }, { select: 'player_id' }),
     ]);
-    const days = await DB.list('plan_days', { plan_id: plans.map(p => p.id) }, { select: 'id,plan_id,weekday' });
+    // Letzter Eintrag in der Plan-PDF je Spieler
+    const vals = await DB.list('pdf_values', { player_id: players.map(p => p.id) }, { select: 'player_id,updated_at', order: '-updated_at', limit: 1000 });
     if (!live()) return;
     const active = players.filter(p => p.active);
     const archived = players.filter(p => !p.active);
 
     const card = p => {
       const plan = plans.find(x => x.player_id === p.id);
-      const pd = plan ? days.filter(d => d.plan_id === plan.id) : [];
-      const planned = pd.filter(d => d.weekday).length;
-      const doneThisWeek = new Set(logs.filter(l => l.player_id === p.id && l.done && l.date >= week[0]).map(l => `${l.day_id}|${l.date}`)).size;
-      const last = logs.find(l => l.player_id === p.id);
-      const fb = unseen.filter(f => f.player_id === p.id).length;
+      const last = vals.find(v => v.player_id === p.id);
       const access = p.user_id ? '' : invites.some(i => i.player_id === p.id) ? '<span class="pill warn">Einladung offen</span>' : '<span class="pill">Kein Zugang</span>';
+      const planText = !plan ? '<span class="warn-text">kein aktiver Plan</span>' : `${esc(plan.title)}${plan.file_url ? '' : ' · <span class="warn-text">noch ohne PDF</span>'}`;
       return `<a class="card player-card" href="#/spieler/${p.id}">
         <span class="avatar">${esc(initials(p.name))}</span>
         <div class="pc-main">
-          <div class="pc-name"><strong>${esc(p.name)}</strong>${fb ? `<span class="pill accent">${fb} neu</span>` : ''}${access}</div>
-          <span class="muted small">${esc(p.sport || '')}${p.sport ? ' · ' : ''}${plan ? esc(plan.title) : '<span class="warn-text">kein aktiver Plan</span>'}</span>
-          <div class="pc-stats">
-            <span class="mini-bar" title="Diese Woche"><i style="width:${planned ? Math.min(100, doneThisWeek / planned * 100) : 0}%"></i></span>
-            <span class="small num">${doneThisWeek}/${planned} diese Woche</span>
-            <span class="small muted">${last ? `zuletzt ${Dates.relative(last.date)}` : 'noch nichts eingetragen'}</span>
-          </div>
+          <div class="pc-name"><strong>${esc(p.name)}</strong>${access}</div>
+          <span class="muted small">${esc(p.sport || '')}${p.sport ? ' · ' : ''}${planText}</span>
+          <span class="small muted">${last ? `zuletzt eingetragen ${Dates.relative(last.updated_at.slice(0, 10))}` : 'noch nichts eingetragen'}</span>
         </div>${icon('next')}</a>`;
     };
 
@@ -103,48 +93,24 @@ const Admin = {
 
   /* ---------- Spieler-Detail ---------- */
   async player(view, id, live) {
-    const today = Dates.today();
-    const week = Dates.week(today);
-    const [[p], plans, invites, logs, feedback] = await Promise.all([
+    const [[p], plans, invites] = await Promise.all([
       DB.list('players', { id }),
       DB.list('plans', { player_id: id }, { order: '-created_at' }),
       DB.list('invites', { player_id: id, used_at: null }, { order: '-created_at' }),
-      DB.list('logs', { player_id: id, date: { gte: Dates.add(today, -42) } }, { order: '-date' }),
-      DB.list('feedback', { player_id: id }, { order: '-date', limit: 30 }),
     ]);
+    if (!live()) return;
     if (!p) { view.innerHTML = '<div class="page"><p class="err-box">Spieler nicht gefunden.</p></div>'; return; }
     const plan = plans.find(x => x.active);
-    const days = await DB.list('plan_days', { plan_id: plans.map(x => x.id) }, { order: 'sort' });
-    const exs = plan ? await DB.list('exercises', { day_id: days.filter(d => d.plan_id === plan.id).map(d => d.id) }, { select: 'id,day_id' }) : [];
-    if (!live()) return;
-    const planDays = plan ? days.filter(d => d.plan_id === plan.id) : [];
-    const dayTitle = dId => (days.find(d => d.id === dId) || {}).title;
 
     const access = p.user_id
-      ? `<p><span class="pill ok">Hat Zugang</span></p><p class="muted small">Passwort vergessen oder neues Handy ohne Login? Zugang zurücksetzen – Trainingsdaten bleiben erhalten, ${esc(p.name.split(' ')[0])} bekommt einen neuen Link.</p>
+      ? `<p><span class="pill ok">Hat Zugang</span></p><p class="muted small">Passwort vergessen oder neues Handy ohne Login? Zugang zurücksetzen – Einträge bleiben erhalten, ${esc(p.name.split(' ')[0])} bekommt einen neuen Link.</p>
          <div class="row-btns"><button class="btn" data-act="reset">Zugang zurücksetzen</button></div>`
       : invites.length
         ? `<p><span class="pill warn">Einladung offen</span> <span class="muted small">seit ${Dates.short(invites[0].created_at)}</span></p>
            <div class="row-btns"><button class="btn primary" data-act="show-invite">${icon('wa')} Link senden</button><button class="btn" data-act="new-invite">Neuer Link</button></div>`
         : `<p><span class="pill">Kein Zugang</span></p><div class="row-btns"><button class="btn primary" data-act="new-invite">Einladungslink erzeugen</button></div>`;
 
-    // Status je Trainingstag in dieser Woche
-    const st = (d, date) => {
-      const total = exs.filter(e => e.day_id === d.id).length;
-      const done = new Set(logs.filter(l => l.day_id === d.id && l.date === date && l.done).map(l => l.exercise_id)).size;
-      const fb = feedback.some(f => f.day_id === d.id && f.date === date);
-      return fb || (total && done >= total) ? { key: 'done' } : done ? { key: 'partial', done, total } : { key: date < today ? 'missed' : 'open' };
-    };
-
-    // Einheiten = Einträge gruppiert nach Tag + Datum
-    const sessions = {};
-    logs.forEach(l => {
-      const k = `${l.date}|${l.day_id || l.exercise_name}`;
-      (sessions[k] = sessions[k] || { date: l.date, day_id: l.day_id, logs: [] }).logs.push(l);
-    });
-    const sessionList = Object.values(sessions).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
-
-    view.innerHTML = `<div class="page">
+    view.innerHTML = `<div class="page narrow">
       <header class="page-head sub-head">
         <a class="icon-btn" href="#/spieler" aria-label="Zurück">${icon('back')}</a>
         <span class="avatar lg">${esc(initials(p.name))}</span>
@@ -152,48 +118,23 @@ const Admin = {
         <button class="icon-btn" data-act="edit" aria-label="Spieler bearbeiten">${icon('edit')}</button>
       </header>
       ${p.notes ? `<p class="card note">${richText(p.notes)}</p>` : ''}
-      <div class="cols">
-        <div class="col">
-          <section class="card">
-            <div class="card-head"><h2>Trainingsplan</h2><button class="btn small" data-act="new-plan">${icon('plus')} Neuer Plan</button></div>
-            ${plan ? `<a class="plan-box" href="#/plan/${plan.id}">
-                <div><strong>${esc(plan.title)}${plan.file_url ? ' <span class="pill">PDF</span>' : ''}</strong><span class="muted small">${plan.start_date ? `ab ${Dates.short(plan.start_date)}` : ''}${plan.weeks ? ` · ${plan.weeks} Wochen` : ''}</span></div>
-                <span class="btn small">${icon('edit')} Bearbeiten</span></a>
-              ${plan.file_url ? `<a class="btn block" href="#/pdf/${plan.id}">${icon('file')} Ausgefüllte PDF ansehen</a>` : ''}
-              <ol class="week compact">${week.map(date => {
-                const ds = planDays.filter(d => d.weekday === Dates.weekday(date));
-                return `<li class="${date === today ? 'is-today' : ''}"><span class="wd"><strong>${WD[Dates.weekday(date) - 1]}</strong></span>
-                  <div class="wd-items">${ds.map(d => `<span class="wd-item">${Player.statusIcon(st(d, date))}<span>${esc(d.title)}</span></span>`).join('') || '<span class="muted small">frei</span>'}</div></li>`;
-              }).join('')}</ol>
-              ${planDays.some(d => !d.weekday) ? `<p class="muted small">Flexibel: ${planDays.filter(d => !d.weekday).map(d => esc(d.title)).join(', ')}</p>` : ''}`
-            : '<p class="muted">Noch kein aktiver Plan.</p>'}
-            ${plans.filter(x => !x.active).length ? `<details class="older"><summary>Frühere Pläne (${plans.filter(x => !x.active).length})</summary>
-              ${plans.filter(x => !x.active).map(x => `<div class="older-row"><a href="#/plan/${x.id}">${esc(x.title)}</a><span class="muted small">${Dates.short(x.created_at)}</span><button class="btn small" data-act="activate" data-id="${x.id}">Aktivieren</button></div>`).join('')}
-            </details>` : ''}
-          </section>
-          <section class="card">
-            <div class="card-head"><h2>Zugang</h2></div>
-            ${access}
-          </section>
-        </div>
-        <div class="col">
-          <section class="card">
-            <h2>Feedback</h2>
-            ${feedback.length ? `<ul class="fb-list">${feedback.map(f => this.fbItem(f)).join('')}</ul>` : '<p class="muted">Noch kein Feedback.</p>'}
-          </section>
-          <section class="card">
-            <h2>Letzte Einheiten</h2>
-            ${sessionList.length ? `<div class="sessions">${sessionList.map(s => `<details class="session">
-              <summary><span class="num">${Dates.short(s.date)}</span><strong>${esc(dayTitle(s.day_id) || 'Training')}</strong>
-                <span class="muted small">${s.logs.filter(l => l.done).length}/${s.logs.length} erledigt</span></summary>
-              <table class="log-table">${s.logs.map(l => `<tr><td>${l.done ? icon('check', 'ok') : ''}</td><td>${esc(l.exercise_name)}</td><td class="num">${esc(setsText(l.sets)) || '–'}</td></tr>`).join('')}</table>
-            </details>`).join('')}</div>` : '<p class="muted">In den letzten 6 Wochen nichts eingetragen.</p>'}
-          </section>
-        </div>
-      </div>
+      <section class="card">
+        <div class="card-head"><h2>Trainingsplan</h2><button class="btn small" data-act="new-plan">${icon('plus')} Neuer Plan</button></div>
+        ${plan ? `<a class="plan-box" href="#/plan/${plan.id}">
+            <div><strong>${esc(plan.title)}${plan.file_url ? ' <span class="pill">PDF</span>' : ''}</strong><span class="muted small">${plan.start_date ? `ab ${Dates.short(plan.start_date)}` : ''}${plan.weeks ? ` · ${plan.weeks} Wochen` : ''}</span></div>
+            <span class="btn small">${icon('edit')} Bearbeiten</span></a>
+          ${plan.file_url ? `<a class="btn primary block" href="#/pdf/${plan.id}">${icon('file')} Ausgefüllte PDF ansehen</a>` : '<p class="muted small">Zu diesem Plan ist noch keine PDF hochgeladen – der Spieler sieht ihn erst mit PDF.</p>'}`
+        : '<p class="muted">Noch kein aktiver Plan.</p>'}
+        ${plans.filter(x => !x.active).length ? `<details class="older"><summary>Frühere Pläne (${plans.filter(x => !x.active).length})</summary>
+          ${plans.filter(x => !x.active).map(x => `<div class="older-row"><a href="#/plan/${x.id}">${esc(x.title)}</a><span class="muted small">${Dates.short(x.created_at)}</span><button class="btn small" data-act="activate" data-id="${x.id}">Aktivieren</button></div>`).join('')}
+        </details>` : ''}
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Zugang</h2></div>
+        ${access}
+      </section>
     </div>`;
 
-    this.bindFeedback(view, () => this.refreshBadge());
     view.onclick = async e => {
       const b = e.target.closest('[data-act]');
       if (!b) return;
