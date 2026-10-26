@@ -1,7 +1,7 @@
 // Service Worker: holt die App immer frisch aus dem Netz (damit Updates sofort ankommen)
 // und fällt nur ohne Netz auf die gespeicherte Kopie zurück.
 // Trainingsdaten werden NICHT gespeichert – Anfragen an Supabase laufen am Service Worker vorbei.
-const CACHE = 'athletik-v18';
+const CACHE = 'athletik-v19';
 const ASSETS = [
   './', './index.html', './styles.css', './config.js', './auth.js', './demo.js', './ui.js', './player.js', './pdfview.js', './admin.js', './app.js',
   './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/logo-skfb.png',
@@ -36,7 +36,8 @@ self.addEventListener('fetch', (event) => {
     let res = null;
     try {
       res = await Promise.race([
-        fetch(req.url, { cache: 'no-cache' }),
+        // Zufalls-Parameter umgeht den Zwischenspeicher von GitHub (bis 10 Min.) – Updates kommen sofort an
+        fetch(`${url.origin}${url.pathname}?_=${Date.now()}`, { cache: 'no-store' }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), NETWORK_TIMEOUT_MS)),
       ]);
       if (res.ok) {

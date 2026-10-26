@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '17';
+const APP_VERSION = '18';
 
 // Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
 const DEMO_PARAM = new URLSearchParams(location.search).get('demo');
@@ -275,9 +275,10 @@ async function checkForUpdate() {
     if (!res.ok) return;
     const { version } = await res.json();
     if (version === APP_VERSION || $('.sheet-bg') || document.querySelector('.dirty')) return;
-    // Schutz vor Endlos-Schleife, falls der Cache noch die alte Version liefert
-    if (sessionStorage.getItem('ar-update-tried') === version) return;
-    sessionStorage.setItem('ar-update-tried', version);
+    // Schutz vor Endlos-Schleife, aber nach einer Minute neuer Versuch
+    const tried = JSON.parse(sessionStorage.getItem('ar-update-tried') || '{}');
+    if (tried.v === version && Date.now() - tried.t < 60000) return;
+    sessionStorage.setItem('ar-update-tried', JSON.stringify({ v: version, t: Date.now() }));
     const reg = await navigator.serviceWorker?.getRegistration();
     await reg?.update();
     location.reload();
