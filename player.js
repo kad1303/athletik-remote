@@ -13,10 +13,10 @@ const Player = {
 
   /* ---------- Start: Hallo, Woche Mo–Fr, Weg zum Plan ---------- */
   async home(view, live) {
-    const plan = await this.activePlan();
-    const fields = plan && plan.file_url ? await DB.list('pdf_fields', { plan_id: plan.id }, { select: 'id' }) : [];
-    const vals = fields.length ? await DB.list('pdf_values', { player_id: this.pid(), field_id: fields.map(f => f.id) }, { select: 'value,updated_at' }) : [];
-    if (!live()) return;
+    await this.withData(live, d => this.drawHome(view, d));
+  },
+
+  drawHome(view, { plan, values: vals }) {
     const today = Dates.today();
     const week = Dates.week(today).slice(0, 5);
     // Tage, an denen etwas in den Plan eingetragen wurde
@@ -46,9 +46,49 @@ const Player = {
 
   pid() { return App.me.player_id; },
 
-  async activePlan() {
-    const [plan] = await DB.list('plans', { player_id: this.pid(), active: true }, { order: '-created_at', limit: 1 });
-    return plan || null;
+  /* Alles, was die Spielerseiten brauchen, in einem Rutsch: Plan (mit Feldern) + eigene Einträge.
+     Der letzte Stand liegt im Gerät → Seiten erscheinen sofort, frische Daten kommen im Hintergrund. */
+  snap: null,
+  snapKey() { return `athletik:snap:${this.pid()}`; },
+  cached() {
+    if (this.snap && this.snap.pid === this.pid()) return this.snap;
+    try { return (this.snap = JSON.parse(localStorage.getItem(this.snapKey()))); } catch { return null; }
+  },
+  keep(d) {
+    d.pid = this.pid();
+    this.snap = d;
+    try { localStorage.setItem(this.snapKey(), JSON.stringify(d)); } catch {}
+  },
+  async fresh() {
+    let plan, fields, values;
+    if (DEMO) {
+      [plan] = await DB.list('plans', { player_id: this.pid(), active: true }, { order: '-created_at', limit: 1 });
+      fields = plan ? await DB.list('pdf_fields', { plan_id: plan.id }) : [];
+      values = await DB.list('pdf_values', { player_id: this.pid() });
+    } else {
+      const [plans, vals] = await Promise.all([
+        DB.list('plans', { player_id: this.pid(), active: true }, { order: '-created_at', limit: 1, select: '*,pdf_fields(id,page,kind,x,y,w,h)' }),
+        DB.list('pdf_values', { player_id: this.pid() }, { select: 'field_id,value,updated_at' }),
+      ]);
+      plan = plans[0] || null;
+      fields = plan ? plan.pdf_fields || [] : [];
+      if (plan) delete plan.pdf_fields;
+      values = vals;
+    }
+    const ids = new Set(fields.map(f => f.id));
+    const d = { plan: plan || null, fields, values: values.filter(v => ids.has(v.field_id)).map(v => ({ field_id: v.field_id, value: v.value, updated_at: v.updated_at })) };
+    this.keep(d);
+    return d;
+  },
+  sig(d) { return JSON.stringify([d.plan && [d.plan.id, d.plan.title, d.plan.file_url, d.plan.notes], d.fields.map(f => f.id), d.values.map(v => [v.field_id, v.value])]); },
+  // Zeichnet sofort aus dem Speicher und noch einmal, falls sich online etwas geändert hat
+  async withData(live, draw) {
+    const old = this.cached();
+    if (old) draw(old);
+    let d;
+    try { d = await this.fresh(); }
+    catch (e) { if (old) { console.warn('Aktualisieren fehlgeschlagen', e); return; } throw e; }
+    if (live() && (!old || this.sig(old) !== this.sig(d))) draw(d);
   },
 
   // Umschalter im Reiter Plan: PDF ↔ Videos zu den Übungen im Plan
@@ -58,7 +98,7 @@ const Player = {
 
   /* ---------- Videos zum Plan: Abgleich Übungen in der PDF ↔ Video-Datenbank ---------- */
   async planVideos(view, live) {
-    const plan = await this.activePlan();
+    const { plan } = this.cached() || await this.fresh();
     if (!live()) return;
     if (!plan || !plan.file_url) { location.hash = '#/plan'; return; }
     view.innerHTML = `<div class="page narrow">
@@ -67,7 +107,7 @@ const Player = {
       <div id="pv"><div class="spinner"></div></div>
     </div>`;
     const [videos, exercises] = await Promise.all([
-      DB.list('content', { section: 'videos' }, { order: 'sort,-created_at' }),
+      this.videoList(),
       PlanVideos.exercises(plan.file_url),
     ]);
     if (!live()) return;
@@ -83,17 +123,16 @@ const Player = {
 
   /* ---------- Plan: die PDF von Alex, Kreuze und Gewichte direkt eintragen ---------- */
   async plan(view, live) {
-    const plan = await this.activePlan();
-    if (!live()) return;
+    await this.withData(live, d => this.drawPlan(view, d));
+  },
+
+  drawPlan(view, { plan, fields, values: vals }) {
     if (!plan || !plan.file_url) {
       const first = String(App.me.name || '').split(' ')[0];
       view.innerHTML = `<div class="page narrow"><header class="page-head"><h1>Plan</h1></header>
         <section class="card empty">${icon('file', 'big')}<h2>Dein Plan kommt gleich</h2><p class="muted">Alex lädt deinen Trainingsplan hier hoch. Sobald er da ist, kannst du ihn direkt ausfüllen.</p></section></div>`;
       return;
     }
-    const fields = await DB.list('pdf_fields', { plan_id: plan.id });
-    const vals = await DB.list('pdf_values', { player_id: this.pid(), field_id: fields.map(f => f.id) });
-    if (!live()) return;
     view.innerHTML = `<div class="page pdf-page-wrap">
       <header class="page-head">
         <div><h1>${esc(plan.title)}</h1></div>
@@ -103,13 +142,17 @@ const Player = {
       <div id="pdf-box" class="pdf-box"></div>
     </div>`;
     const saveState = $('#save-state');
-    await PdfView.mount($('#pdf-box'), plan.file_url, {
+    PdfView.mount($('#pdf-box'), plan.file_url, {
       mode: 'fill', fields, values: Object.fromEntries(vals.map(v => [v.field_id, v.value])),
       onValue: async (f, value) => {
         saveState.textContent = 'Speichert …';
         saveState.className = 'save-state';
         try {
-          await DB.upsert('pdf_values', { field_id: f.id, player_id: this.pid(), value, updated_at: new Date().toISOString() }, 'field_id,player_id');
+          const updated_at = new Date().toISOString();
+          await DB.upsert('pdf_values', { field_id: f.id, player_id: this.pid(), value, updated_at }, 'field_id,player_id');
+          // Gerätespeicher mitziehen, damit beim nächsten Öffnen der neue Wert sofort da ist
+          const s = this.cached();
+          if (s) { s.values = s.values.filter(v => v.field_id !== f.id).concat({ field_id: f.id, value, updated_at }); this.keep(s); }
           saveState.textContent = 'Gespeichert';
           saveState.className = 'save-state ok';
         } catch (x) {
@@ -118,13 +161,30 @@ const Player = {
           toast(friendlyAuthError(x), 'err');
         }
       },
+    }).catch(x => { const box = $('#pdf-box', view); if (box) box.innerHTML = `<p class="err-box">${esc(friendlyAuthError(x))}</p>`; });
+  },
+
+  // Video-Liste: letzter Stand sofort, frischer Stand im Hintergrund
+  async videoList(onFresh) {
+    const key = 'athletik:videos';
+    let old = null;
+    try { old = JSON.parse(localStorage.getItem(key)); } catch {}
+    const load = DB.list('content', { section: 'videos' }, { order: 'sort,-created_at' }).then(list => {
+      try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
+      if (onFresh && old && JSON.stringify(old) !== JSON.stringify(list)) onFresh(list);
+      return list;
     });
+    if (old) { load.catch(e => console.warn(e)); return old; }
+    return load;
   },
 
   /* ---------- Trainingsvideos ---------- */
   async videos(view, live) {
-    const items = await DB.list('content', { section: 'videos' }, { order: 'sort,-created_at' });
-    if (!live()) return;
+    const draw = items => { if (live()) this.drawVideos(view, items); };
+    draw(await this.videoList(draw));
+  },
+
+  drawVideos(view, items) {
     view.innerHTML = `<div class="page narrow">
       <header class="page-head"><div><h1>Trainingsvideos</h1></div></header>
       ${items.length ? `<div class="content-list">${items.map(c => contentCard(c)).join('')}</div>` : `<section class="card empty">${icon('play', 'big')}<p class="muted">Hier ist noch nichts – Alex lädt bald Videos hoch.</p></section>`}

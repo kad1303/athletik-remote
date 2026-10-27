@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '20';
+const APP_VERSION = '21';
 
 // Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
 const DEMO_PARAM = new URLSearchParams(location.search).get('demo');
@@ -14,6 +14,7 @@ const DEMO = !Auth.configured() || DEMO_PARAM !== null;
 const DB = DEMO ? Demo.load() : Remote;
 const INVITE_KEY = 'athletik:invite';
 const DEMO_ROLE_KEY = 'athletik:demo-role';
+const ME_KEY = 'athletik:me';
 
 const App = { me: null, badge: 0 };
 
@@ -51,6 +52,20 @@ async function boot() {
 
   Auth.load();
   if (!Auth.session) return invite ? renderInvite(invite) : renderLogin();
+
+  // Schon bekannt? Dann sofort loslegen und den Zugang im Hintergrund prüfen
+  const known = (() => { try { return JSON.parse(localStorage.getItem(ME_KEY)); } catch { return null; } })();
+  if (!invite && known && known.user_id === Auth.session.user.id) {
+    App.me = { ...known, email: Auth.session.user.email };
+    startShell();
+    DB.list('members', { user_id: Auth.session.user.id }).then(([mem]) => {
+      if (!mem) { localStorage.removeItem(ME_KEY); return renderNoAccess(); }
+      try { localStorage.setItem(ME_KEY, JSON.stringify(mem)); } catch {}
+      if (mem.role !== known.role || mem.player_id !== known.player_id) { App.me = { ...mem, email: Auth.session.user.email }; startShell(); }
+    }).catch(e => console.warn('Zugang nicht geprüft', e));
+    return;
+  }
+
   try {
     let [mem] = await DB.list('members', { user_id: Auth.session.user.id });
     if (invite) {
@@ -62,6 +77,7 @@ async function boot() {
       [mem] = await DB.list('members', { user_id: Auth.session.user.id });
     }
     if (!mem) return renderNoAccess();
+    try { localStorage.setItem(ME_KEY, JSON.stringify(mem)); } catch {}
     App.me = { ...mem, email: Auth.session.user.email };
     startShell();
   } catch (e) {
@@ -245,7 +261,7 @@ async function renderProfile(view) {
     showInvite(name, code, 'Hi! Hier ist dein Trainer-Zugang für Athletik Remote:');
   };
   $('#logout').onclick = async () => {
-    if (DEMO) { sessionStorage.removeItem(DEMO_ROLE_KEY); if (DEMO_PARAM !== null) { location.href = location.pathname; return; } } else await Auth.signOut();
+    if (DEMO) { sessionStorage.removeItem(DEMO_ROLE_KEY); if (DEMO_PARAM !== null) { location.href = location.pathname; return; } } else { await Auth.signOut(); clearDeviceData(); }
     App.me = null;
     location.hash = '';
     boot();
@@ -285,6 +301,12 @@ async function checkForUpdate() {
   } catch (e) {
     console.warn('Update-Prüfung fehlgeschlagen', e);
   }
+}
+
+// Gemerkte Daten (Zugang, Plan, Videos) vom Gerät entfernen – z. B. beim Abmelden
+function clearDeviceData() {
+  try { Object.keys(localStorage).filter(k => k === ME_KEY || k.startsWith('athletik:snap:') || k === 'athletik:videos').forEach(k => localStorage.removeItem(k)); } catch {}
+  if (typeof Player !== 'undefined') Player.snap = null;
 }
 
 Auth.onExpired = () => { App.me = null; renderLogin('Bitte melde dich erneut an.'); };
