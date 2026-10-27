@@ -32,19 +32,20 @@ const Admin = {
   /* ---------- Spielerliste ---------- */
   async players(view, live) {
     await swr('spieler', async () => {
-      const [players, plans, invites, vals, newVids] = await Promise.all([
+      const [players, plans, invites, vals, newVids, newFb] = await Promise.all([
         DB.list('players', {}, { order: 'name' }),
         DB.list('plans', { active: true, player_id: { not: 'is.null' } }, { select: 'id,player_id,title,file_url' }),
         DB.list('invites', { used_at: null, role: 'player' }, { select: 'player_id' }),
         // Letzter Eintrag in der Plan-PDF je Spieler
         DB.list('pdf_values', {}, { select: 'player_id,updated_at', order: '-updated_at', limit: 1000 }),
         DB.list('player_videos', { coach_seen: false }, { select: 'player_id' }).catch(() => []),
+        DB.list('feedback', { coach_seen: false }, { select: 'player_id' }).catch(() => []),
       ]);
-      return { players, plans, invites, vals, newVids };
+      return { players, plans, invites, vals, newVids, newFb };
     }, d => this.drawPlayers(view, d), live);
   },
 
-  drawPlayers(view, { players, plans, invites, vals, newVids = [] }) {
+  drawPlayers(view, { players, plans, invites, vals, newVids = [], newFb = [] }) {
     const active = players.filter(p => p.active);
     const archived = players.filter(p => !p.active);
 
@@ -56,7 +57,7 @@ const Admin = {
       return `<a class="card player-card" href="#/spieler/${p.id}">
         <span class="avatar">${esc(initials(p.name))}</span>
         <div class="pc-main">
-          <div class="pc-name"><strong>${esc(p.name)}</strong>${newVids.some(v => v.player_id === p.id) ? '<span class="pill accent">neues Video</span>' : ''}${access}</div>
+          <div class="pc-name"><strong>${esc(p.name)}</strong>${newFb.some(v => v.player_id === p.id) ? '<span class="pill accent">neues Feedback</span>' : ''}${newVids.some(v => v.player_id === p.id) ? '<span class="pill accent">neues Video</span>' : ''}${access}</div>
           <span class="muted small">${esc(p.sport || '')}${p.sport ? ' · ' : ''}${planText}</span>
           <span class="small muted">${last ? `zuletzt eingetragen ${Dates.relative(last.updated_at.slice(0, 10))}` : 'noch nichts eingetragen'}</span>
         </div>${icon('next')}</a>`;
@@ -107,7 +108,24 @@ const Admin = {
         DB.list('invites', { player_id: id, used_at: null }, { order: '-created_at' }),
       ]);
       return { p: p || null, plans, invites };
-    }, d => { this.drawPlayer(view, d); this.drawPlayerVideos(view, id); }, live);
+    }, d => { this.drawPlayer(view, d); this.drawPlayerFeedback(view, id).then(() => this.drawPlayerVideos(view, id)); }, live);
+  },
+
+  // Feedback nach Einheiten (Dauer, Intensität 0–10, Kommentar); beim Ansehen als gelesen markieren
+  async drawPlayerFeedback(view, id) {
+    const list = await DB.list('feedback', { player_id: id }, { order: '-date,-created_at', limit: 30 }).catch(() => []);
+    const page = $('.page', view);
+    if (!page || !page.isConnected) return;
+    $('#pfb', view)?.remove();
+    const hot = r => r >= 9 ? 'hot' : r >= 7 ? 'warm' : '';
+    page.insertAdjacentHTML('beforeend', `<section class="card" id="pfb"><h2>Feedback zu Einheiten</h2>
+      ${list.length ? `<ul class="fb-list">${list.map(f => `<li class="${f.coach_seen ? '' : 'new'}">
+        <div class="fb-meta"><strong>${Dates.short(f.date)}</strong>${f.day_title ? `<span class="muted small">${esc(f.day_title)}</span>` : ''}
+          ${f.duration_min ? `<span class="pill">${f.duration_min} Min.</span>` : ''}${f.rpe != null ? `<span class="pill ${hot(f.rpe)}">Intensität ${f.rpe}/10</span>` : ''}${f.coach_seen ? '' : '<span class="pill accent">neu</span>'}</div>
+        ${f.text ? `<p>${richText(f.text)}</p>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Noch kein Feedback.</p>'}
+    </section>`);
+    const unseen = list.filter(f => !f.coach_seen);
+    if (unseen.length) Promise.all(unseen.map(f => DB.update('feedback', f.id, { coach_seen: true }))).catch(() => {});
   },
 
   // Videos, die der Spieler an Alex geschickt hat (neu = noch nicht angesehen)
@@ -405,15 +423,13 @@ const Admin = {
         <a class="icon-btn" href="#/woche/${Dates.add(ws, -7)}" aria-label="Vorige Woche">${icon('back')}</a>
         <strong>KW ${Dates.kw(ws)} · ${d0.getDate()}.${d0.getMonth() + 1}. – ${d6.getDate()}.${d6.getMonth() + 1}.${d6.getFullYear()}</strong>
         <a class="icon-btn" href="#/woche/${Dates.add(ws, 7)}" aria-label="Nächste Woche">${icon('next')}</a>
-        <button class="btn small" id="copy-week">${icon('copy')} Wie Vorwoche</button>
         <span class="save-state" id="save-state"></span>
       </div>
       ${players.length ? `<div class="wp-scroll"><table class="wp-table">
         <thead><tr><th>Spieler</th>${days.map(d => `<th class="${d === today ? 'today' : ''}">${WD[Dates.weekday(d) - 1]}<span>${Dates.parse(d).getDate()}.</span></th>`).join('')}</tr></thead>
-        <tbody>${players.map(p => `<tr><th>${esc(p.name)}</th>${days.map((d, i) => `<td><input list="wp-parts" data-p="${p.id}" data-wd="${i + 1}" value="${esc(val(p.id, i + 1))}" aria-label="${esc(p.name)} ${WD_LONG[i]}"></td>`).join('')}</tr>`).join('')}</tbody>
+        <tbody>${players.map(p => `<tr><th>${esc(p.name)}</th>${days.map((d, i) => `<td><textarea rows="2" data-p="${p.id}" data-wd="${i + 1}" aria-label="${esc(p.name)} ${WD_LONG[i]}">${esc(val(p.id, i + 1))}</textarea></td>`).join('')}</tr>`).join('')}</tbody>
       </table></div>
-      <datalist id="wp-parts"><option>Day 1</option><option>Day 2</option><option>Day 3</option><option>Day 1 + Circuit</option><option>Day 2 + Circuit</option><option>Circuit</option><option>Frei</option></datalist>
-      <p class="muted small">Einfach eintippen oder aus der Liste wählen – wird sofort gespeichert. Leeres Feld = nichts geplant.</p>`
+`
       : '<section class="card empty"><p class="muted">Noch keine aktiven Spieler.</p></section>'}
     </div>`;
     const st = $('#save-state', view);
@@ -427,17 +443,7 @@ const Admin = {
         st.textContent = 'Gespeichert'; st.className = 'save-state ok';
       } catch (x) { st.textContent = 'Nicht gespeichert'; st.className = 'save-state bad'; toast(friendlyAuthError(x), 'err'); }
     };
-    $$('.wp-table input', view).forEach(inp => { inp.onchange = () => save(inp); });
-    const copy = $('#copy-week', view);
-    if (copy) copy.onclick = async () => {
-      if (rows.length && !(await confirmSheet('Diese Woche mit der Vorwoche überschreiben?', 'Übernehmen'))) return;
-      const prev = await DB.list('week_plans', { week_start: Dates.add(ws, -7) });
-      if (!prev.length) { toast('In der Vorwoche ist nichts eingetragen.'); return; }
-      await DB.remove('week_plans', { week_start: ws });
-      await DB.upsert('week_plans', prev.map(r => ({ player_id: r.player_id, week_start: ws, weekday: r.weekday, text: r.text, updated_at: new Date().toISOString() })), 'player_id,week_start,weekday');
-      toast('Vorwoche übernommen');
-      route();
-    };
+    $$('.wp-table textarea', view).forEach(inp => { inp.onchange = () => save(inp); });
   },
 
   /* ---------- Ausgefüllte Plan-PDF eines Spielers ---------- */

@@ -16,18 +16,18 @@ const Player = {
     await this.withData(live, d => this.drawHome(view, d));
   },
 
-  drawHome(view, { plan, values: vals, week: wp = [] }) {
+  drawHome(view, { plan, values: vals, week: wp = [], fb = [] }) {
     const today = Dates.today();
     // Sonntags zeigt die Startseite schon die kommende Woche, sobald Alex sie eingetragen hat
     let ws = Dates.monday(today);
     const next = Dates.add(ws, 7);
     const showNext = Dates.weekday(today) === 7 && wp.some(r => r.week_start === next);
     if (showNext) ws = next;
-    const partOf = d => (wp.find(r => r.week_start === ws && r.weekday === Dates.weekday(d)) || {}).text || '';
-    // Mo–Fr, Samstag/Sonntag nur wenn dort etwas geplant ist
-    const week = Dates.week(ws).filter((d, i) => i < 5 || partOf(d));
-    // Tage, an denen etwas in den Plan eingetragen wurde
-    const active = new Set(vals.filter(v => v.value).map(v => Dates.iso(new Date(v.updated_at))));
+    const partOf = d => (wp.find(r => r.week_start === Dates.monday(d) && r.weekday === Dates.weekday(d)) || {}).text || '';
+    const week = Dates.week(ws);
+    // Erledigt = Feedback gegeben oder etwas in den Plan eingetragen
+    const active = new Set([...vals.filter(v => v.value).map(v => Dates.iso(new Date(v.updated_at))), ...fb.map(f => f.date)]);
+    const fbToday = fb.find(f => f.date === today);
     const first = String(App.me.name || '').split(' ')[0];
     const hasPlan = plan && plan.file_url;
     // Plan schon im Hintergrund laden, damit der Reiter „Plan“ sofort da ist
@@ -38,8 +38,10 @@ const Player = {
       <header class="page-head"><div><h1>Hallo ${esc(first)}</h1><p class="muted">${Dates.long(today)}</p></div></header>
       <section class="card">
         <h2>${showNext ? 'Nächste Woche' : 'Diese Woche'}</h2>
-        <div class="week5" style="--n:${week.length}">${week.map(d => `<div class="wk-day ${d === today ? 'today' : ''} ${active.has(d) ? 'done' : ''} ${partOf(d) ? 'has-part' : ''}">
-          <span>${WD[Dates.weekday(d) - 1]}</span><strong>${Dates.parse(d).getDate()}</strong>${partOf(d) ? `<em>${esc(partOf(d))}</em>` : ''}<i>${active.has(d) ? icon('check') : ''}</i></div>`).join('')}</div>
+        <ul class="wk-list">${week.map(d => `<li class="${d === today ? 'today' : ''} ${active.has(d) ? 'done' : ''}">
+          <span class="wk-d"><strong>${WD[Dates.weekday(d) - 1]}</strong><small>${Dates.parse(d).getDate()}.${Dates.parse(d).getMonth() + 1}.</small></span>
+          <span class="wk-t">${partOf(d) ? richText(partOf(d)) : '<span class="muted">–</span>'}</span>
+          <span class="wk-c">${active.has(d) ? icon('check') : ''}</span></li>`).join('')}</ul>
       </section>
       ${hasPlan ? `<a class="start-card" href="#/plan">
           <span class="eyebrow">Dein Trainingsplan</span>
@@ -47,9 +49,53 @@ const Player = {
           <span class="go">Hier geht's zu deinem Trainingsplan ${icon('next')}</span>
         </a>`
         : `<section class="card empty">${icon('file', 'big')}<h2>Dein Plan kommt gleich</h2><p class="muted">Alex lädt deinen Trainingsplan hier hoch.</p></section>`}
+      <section class="card fb-card">
+        <h2>Einheit geschafft?</h2>
+        ${fbToday ? `<p class="fb-done">${icon('check')} Feedback für heute gesendet${fbToday.duration_min ? ` · ${fbToday.duration_min} Min.` : ''}${fbToday.rpe != null ? ` · Intensität ${fbToday.rpe}/10` : ''}</p>` : '<p class="muted small">Nach jeder Einheit kurz Feedback an Alex: Dauer, Intensität und Kommentar.</p>'}
+        <button class="btn ${fbToday ? '' : 'primary'} block" id="fb-open">${fbToday ? 'Weiteres Feedback geben' : 'Feedback geben'}</button>
+      </section>
       ${hasPlan && plan.notes ? `<section class="card note"><h2>Hinweis von Alex</h2><p>${richText(plan.notes)}</p></section>` : ''}
     </div>`;
+    $('#fb-open', view).onclick = () => this.feedbackSheet(partOf(today));
   },
+
+  /* ---------- Feedback nach einer Einheit: Dauer, Intensität 0–10, Kommentar ---------- */
+  feedbackSheet(part = '') {
+    const today = Dates.today();
+    let rpe = null;
+    const s = openSheet(`<h2>Feedback zur Einheit</h2>
+      <form class="form" id="fbf">
+        <div class="two">
+          <label>Datum<input type="date" name="date" value="${today}" max="${today}" required></label>
+          <label>Dauer (Minuten)<input type="number" name="dur" inputmode="numeric" min="1" max="600" placeholder="z. B. 60" required></label>
+        </div>
+        <label>Was hast du gemacht?<input name="part" value="${esc(part)}" placeholder="z. B. Day 1"></label>
+        <div class="rpe-label"><span>Intensität</span><strong id="rpe-text">bitte wählen</strong></div>
+        <div class="rpe rpe11">${Array.from({ length: 11 }, (_, i) => `<button type="button" data-rpe="${i}" style="--h:${i}">${i}</button>`).join('')}</div>
+        <label>Kommentar<textarea name="text" rows="3"></textarea></label>
+        <button class="btn primary block" type="submit">Feedback senden</button>
+      </form>`);
+    $$('[data-rpe]', s).forEach(b => b.onclick = () => {
+      rpe = +b.dataset.rpe;
+      $$('[data-rpe]', s).forEach(x => x.classList.toggle('on', x === b));
+      $('#rpe-text', s).textContent = `${rpe} von 10`;
+    });
+    $('#fbf', s).onsubmit = async e => {
+      e.preventDefault();
+      const f = e.target.elements;
+      if (rpe === null) { toast('Bitte die Intensität wählen.'); return; }
+      const btn = e.target.querySelector('[type=submit]');
+      btn.disabled = true;
+      try {
+        await DB.insert('feedback', { player_id: this.pid(), day_id: null, day_title: f.part.value.trim() || 'Training', date: f.date.value || today, duration_min: +f.dur.value || null, rpe, text: f.text.value.trim() });
+        closeSheet();
+        toast('Danke! Dein Feedback ist bei Alex.');
+        this.snap = null;
+        route();
+      } catch (x) { toast(friendlyAuthError(x), 'err'); btn.disabled = false; }
+    };
+  },
+
 
   pid() { return App.me.player_id; },
 
@@ -71,6 +117,8 @@ const Player = {
     // Wochenplan von Alex: diese und nächste Woche
     const mon = Dates.monday(Dates.today());
     const weekQ = DB.list('week_plans', { player_id: this.pid(), week_start: [mon, Dates.add(mon, 7)] }, { select: 'week_start,weekday,text' }).catch(() => []);
+    // Eigenes Feedback seit Wochenbeginn (für Haken im Kalender)
+    const fbQ = DB.list('feedback', { player_id: this.pid(), date: { gte: mon } }, { select: 'date,rpe,duration_min' }).catch(() => []);
     if (DEMO) {
       [plan] = await DB.list('plans', { player_id: this.pid(), active: true }, { order: '-created_at', limit: 1 });
       fields = plan ? await DB.list('pdf_fields', { plan_id: plan.id }) : [];
@@ -87,11 +135,12 @@ const Player = {
     }
     const ids = new Set(fields.map(f => f.id));
     const week = (await weekQ).map(r => ({ week_start: r.week_start, weekday: r.weekday, text: r.text }));
-    const d = { plan: plan || null, fields, week, values: values.filter(v => ids.has(v.field_id)).map(v => ({ field_id: v.field_id, value: v.value, updated_at: v.updated_at })) };
+    const fb = (await fbQ).map(f => ({ date: f.date, rpe: f.rpe, duration_min: f.duration_min }));
+    const d = { plan: plan || null, fields, week, fb, values: values.filter(v => ids.has(v.field_id)).map(v => ({ field_id: v.field_id, value: v.value, updated_at: v.updated_at })) };
     this.keep(d);
     return d;
   },
-  sig(d) { return JSON.stringify([d.plan && [d.plan.id, d.plan.title, d.plan.file_url, d.plan.notes], d.fields.map(f => f.id), d.values.map(v => [v.field_id, v.value]), d.week]); },
+  sig(d) { return JSON.stringify([d.plan && [d.plan.id, d.plan.title, d.plan.file_url, d.plan.notes], d.fields.map(f => f.id), d.values.map(v => [v.field_id, v.value]), d.week, d.fb]); },
   // Zeichnet sofort aus dem Speicher und noch einmal, falls sich online etwas geändert hat
   async withData(live, draw) {
     const old = this.cached();
@@ -148,11 +197,18 @@ const Player = {
       <header class="page-head">
         <div><h1>${esc(plan.title)}</h1></div>
         <span class="save-state" id="save-state"></span>
+        <button class="btn small primary" id="fb-open">Feedback geben</button>
       </header>
       ${this.planTabs('plan')}
       <div id="pdf-box" class="pdf-box"></div>
     </div>`;
     const saveState = $('#save-state');
+    $('#fb-open', view).onclick = () => {
+      const s = this.cached();
+      const t = Dates.today();
+      const part = s && (s.week || []).find(r => r.week_start === Dates.monday(t) && r.weekday === Dates.weekday(t));
+      this.feedbackSheet(part ? part.text : '');
+    };
     PdfView.mount($('#pdf-box'), plan.file_url, {
       mode: 'fill', fields, values: Object.fromEntries(vals.map(v => [v.field_id, v.value])),
       onValue: async (f, value) => {
@@ -196,19 +252,21 @@ const Player = {
   },
 
   drawVideos(view, items) {
-    view.innerHTML = `<div class="page narrow">
+    view.innerHTML = `<div class="page videos-page">
       <header class="page-head"><div><h1>Trainingsvideos</h1></div></header>
+      <div class="videos-main">
+      ${items.length ? videoGroups(items, c => contentCard(c)) : `<section class="card empty">${icon('play', 'big')}<p class="muted">Hier ist noch nichts – Alex lädt bald Videos hoch.</p></section>`}
+      </div>
       <section class="card upload-card">
         <h2>Video an Alex schicken</h2>
         <p class="muted small">Z. B. zur Technik-Kontrolle. Am besten kurz halten (max. ${MAX_UPLOAD_MB} MB).</p>
         <form class="form" id="my-up">
-          <input name="title" placeholder="Worum geht's? z. B. Kniebeuge Satz 3">
+          <label>Kommentar<textarea name="title" rows="2"></textarea></label>
           <label class="btn block upload-btn">${icon('upload')} <span class="fname">Video auswählen</span><input type="file" name="file" accept="video/*" hidden></label>
           <button class="btn primary block" type="submit" disabled>Senden</button>
         </form>
         <div id="my-videos"></div>
       </section>
-      ${items.length ? videoGroups(items, c => contentCard(c)) : `<section class="card empty">${icon('play', 'big')}<p class="muted">Hier ist noch nichts – Alex lädt bald Videos hoch.</p></section>`}
     </div>`;
     bindContent(view);
     this.bindUpload(view);

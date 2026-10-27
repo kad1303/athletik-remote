@@ -475,16 +475,47 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .week-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .week-nav strong { font-variant-numeric: tabular-nums; }
 .wp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
-.wp-table { border-collapse: collapse; width: 100%; min-width: 760px; }
+.wp-table { border-collapse: collapse; width: 100%; min-width: 980px; }
 .wp-table th, .wp-table td { border-bottom: 1px solid var(--line); padding: 6px; text-align: left; }
 .wp-table thead th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; }
 .wp-table thead th span { display: block; font-size: 0.9rem; color: var(--ink); letter-spacing: 0; }
 .wp-table thead th.today, .wp-table thead th.today span { color: var(--accent); }
 .wp-table tbody th { position: sticky; left: 0; background: var(--card); font-weight: 700; white-space: nowrap; padding-right: 12px; z-index: 1; }
 .wp-table tbody tr:last-child th, .wp-table tbody tr:last-child td { border-bottom: 0; }
-.wp-table input { padding: 8px; font-size: 0.9rem; min-width: 84px; }
+.wp-table textarea { padding: 8px 10px; font-size: 1rem; line-height: 1.3; min-width: 120px; min-height: 58px; resize: vertical; }
 
 /* ---------- Videos von Spielern ---------- */
 .my-videos { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .my-videos li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .upload-card h3.group-title { margin-top: 6px; }
+
+/* Trainingsvideos (Spieler): Videos links, „Video an Alex“ rechts daneben; auf dem Handy darunter */
+.videos-page { max-width: 1000px; }
+.videos-main { display: grid; gap: 14px; align-content: start; min-width: 0; }
+@media (min-width: 900px) {
+  .videos-page { grid-template-columns: 1fr 320px; align-items: start; }
+  .videos-page > .page-head { grid-column: 1 / -1; }
+  .videos-page > .upload-card { position: sticky; top: 20px; }
+}
+
+/* Spieler-Start: Woche als Liste (Mo–So), Feedback */
+.wk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.wk-list li { display: grid; grid-template-columns: 52px 1fr 24px; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--line); }
+.wk-list li.today { border-color: var(--accent); background: var(--accent-wash); }
+.wk-d { display: grid; line-height: 1.15; }
+.wk-d strong { font-size: 0.95rem; }
+.wk-d small { color: var(--muted); font-size: 0.78rem; }
+.wk-list li.today .wk-d strong { color: var(--accent); }
+.wk-t { font-size: 1.02rem; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.wk-c .ic { width: 20px; height: 20px; color: var(--done); stroke-width: 2.6; }
+.fb-done { display: flex; align-items: center; gap: 6px; color: var(--done); font-weight: 600; }
+.fb-done .ic { width: 18px; height: 18px; stroke-width: 2.6; }
+.rpe.rpe11 { grid-template-columns: repeat(11, 1fr); }
+.rpe.rpe11 button.on { background: hsl(calc(140 - var(--h) * 13) 62% 42%); }
+.form .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rpe-label { display: flex; justify-content: space-between; gap: 8px; font-size: 0.88rem; font-weight: 600; color: var(--ink-2); }
+.rpe.rpe11 { gap: 3px; }
+.rpe.rpe11 button { aspect-ratio: auto; min-height: 0; height: 38px; min-width: 0; padding: 0; font-size: 0.85rem; }
+.form .two > label { min-width: 0; }
+.sheet { overflow-x: hidden; }
+.sheet input[type=date] { min-width: 0; }
