@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '21';
+const APP_VERSION = '22';
 
 // Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
 const DEMO_PARAM = new URLSearchParams(location.search).get('demo');
@@ -17,6 +17,28 @@ const DEMO_ROLE_KEY = 'athletik:demo-role';
 const ME_KEY = 'athletik:me';
 
 const App = { me: null, badge: 0 };
+
+/* Letzter Stand sofort aus dem Gerät, frischer Stand im Hintergrund – neu gezeichnet wird nur bei Änderungen.
+   (Supabase antwortet im kostenlosen Tarif oft erst nach ~1 s.) */
+const CACHE_PREFIX = 'athletik:c:';
+async function swr(key, load, draw, live) {
+  const k = CACHE_PREFIX + key;
+  let old = null;
+  try { old = JSON.parse(localStorage.getItem(k)); } catch {}
+  if (old) draw(old);
+  let d;
+  try { d = await load(); } catch (e) { if (old) { console.warn('Aktualisieren fehlgeschlagen', e); return; } throw e; }
+  try { localStorage.setItem(k, JSON.stringify(d)); } catch {}
+  if (live() && (!old || JSON.stringify(old) !== JSON.stringify(d))) draw(d);
+}
+function dropCache() {
+  try { Object.keys(localStorage).filter(k => k.startsWith(CACHE_PREFIX)).forEach(k => localStorage.removeItem(k)); } catch {}
+}
+// Nach jeder Änderung den gemerkten Stand verwerfen, damit nichts Veraltetes angezeigt wird
+for (const m of ['insert', 'upsert', 'update', 'remove', 'upload']) {
+  const f = DB[m].bind(DB);
+  DB[m] = (...args) => { dropCache(); return f(...args); };
+}
 
 const TABS = {
   player: [['start', 'home', 'Start'], ['plan', 'file', 'Plan'], ['videos', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
@@ -305,7 +327,7 @@ async function checkForUpdate() {
 
 // Gemerkte Daten (Zugang, Plan, Videos) vom Gerät entfernen – z. B. beim Abmelden
 function clearDeviceData() {
-  try { Object.keys(localStorage).filter(k => k === ME_KEY || k.startsWith('athletik:snap:') || k === 'athletik:videos').forEach(k => localStorage.removeItem(k)); } catch {}
+  try { Object.keys(localStorage).filter(k => k === ME_KEY || k.startsWith('athletik:snap:') || k === 'athletik:videos' || k.startsWith(CACHE_PREFIX)).forEach(k => localStorage.removeItem(k)); } catch {}
   if (typeof Player !== 'undefined') Player.snap = null;
 }
 

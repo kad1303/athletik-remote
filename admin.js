@@ -30,14 +30,19 @@ const Admin = {
 
   /* ---------- Spielerliste ---------- */
   async players(view, live) {
-    const [players, plans, invites] = await Promise.all([
-      DB.list('players', {}, { order: 'name' }),
-      DB.list('plans', { active: true, player_id: { not: 'is.null' } }),
-      DB.list('invites', { used_at: null, role: 'player' }),
-    ]);
-    // Letzter Eintrag in der Plan-PDF je Spieler
-    const vals = await DB.list('pdf_values', { player_id: players.map(p => p.id) }, { select: 'player_id,updated_at', order: '-updated_at', limit: 1000 });
-    if (!live()) return;
+    await swr('spieler', async () => {
+      const [players, plans, invites, vals] = await Promise.all([
+        DB.list('players', {}, { order: 'name' }),
+        DB.list('plans', { active: true, player_id: { not: 'is.null' } }, { select: 'id,player_id,title,file_url' }),
+        DB.list('invites', { used_at: null, role: 'player' }, { select: 'player_id' }),
+        // Letzter Eintrag in der Plan-PDF je Spieler
+        DB.list('pdf_values', {}, { select: 'player_id,updated_at', order: '-updated_at', limit: 1000 }),
+      ]);
+      return { players, plans, invites, vals };
+    }, d => this.drawPlayers(view, d), live);
+  },
+
+  drawPlayers(view, { players, plans, invites, vals }) {
     const active = players.filter(p => p.active);
     const archived = players.filter(p => !p.active);
 
@@ -93,12 +98,17 @@ const Admin = {
 
   /* ---------- Spieler-Detail ---------- */
   async player(view, id, live) {
-    const [[p], plans, invites] = await Promise.all([
-      DB.list('players', { id }),
-      DB.list('plans', { player_id: id }, { order: '-created_at' }),
-      DB.list('invites', { player_id: id, used_at: null }, { order: '-created_at' }),
-    ]);
-    if (!live()) return;
+    await swr(`spieler:${id}`, async () => {
+      const [[p], plans, invites] = await Promise.all([
+        DB.list('players', { id }),
+        DB.list('plans', { player_id: id }, { order: '-created_at' }),
+        DB.list('invites', { player_id: id, used_at: null }, { order: '-created_at' }),
+      ]);
+      return { p: p || null, plans, invites };
+    }, d => this.drawPlayer(view, d), live);
+  },
+
+  drawPlayer(view, { p, plans, invites }) {
     if (!p) { view.innerHTML = '<div class="page"><p class="err-box">Spieler nicht gefunden.</p></div>'; return; }
     const plan = plans.find(x => x.active);
 
@@ -368,11 +378,28 @@ const Admin = {
 
   /* ---------- Ausgefüllte Plan-PDF eines Spielers ---------- */
   async pdfFilled(view, id, live) {
-    const [plan] = await DB.list('plans', { id });
+    await swr(`pdf:${id}`, async () => {
+      if (DEMO) {
+        const [plan] = await DB.list('plans', { id });
+        if (!plan) return { plan: null };
+        const [[player], fields] = await Promise.all([DB.list('players', { id: plan.player_id }), DB.list('pdf_fields', { plan_id: id })]);
+        const vals = await DB.list('pdf_values', { player_id: plan.player_id, field_id: fields.map(f => f.id) }, { order: '-updated_at' });
+        return { plan, player, fields, vals };
+      }
+      // Plan + Spieler + Felder + Einträge in einer Anfrage
+      const [x] = await DB.list('plans', { id }, { select: '*,players(name),pdf_fields(id,page,kind,x,y,w,h,pdf_values(field_id,value,updated_at))' });
+      if (!x) return { plan: null };
+      const fields = x.pdf_fields || [];
+      const vals = fields.flatMap(f => f.pdf_values || []).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+      fields.forEach(f => delete f.pdf_values);
+      const player = x.players;
+      delete x.pdf_fields; delete x.players;
+      return { plan: x, player, fields, vals };
+    }, d => this.drawFilled(view, id, d), live);
+  },
+
+  drawFilled(view, id, { plan, player, fields, vals }) {
     if (!plan || !plan.file_url) { view.innerHTML = '<div class="page"><p class="err-box">Zu diesem Plan gibt es keine PDF.</p></div>'; return; }
-    const [[player], fields] = await Promise.all([DB.list('players', { id: plan.player_id }), DB.list('pdf_fields', { plan_id: id })]);
-    const vals = await DB.list('pdf_values', { player_id: plan.player_id, field_id: fields.map(f => f.id) }, { order: '-updated_at' });
-    if (!live()) return;
     const filled = vals.filter(v => v.value).length;
     view.innerHTML = `<div class="page pdf-page-wrap">
       <header class="page-head sub-head">
@@ -383,20 +410,25 @@ const Admin = {
       </header>
       <div id="pdf-box" class="pdf-box"></div>
     </div>`;
-    await PdfView.mount($('#pdf-box'), plan.file_url, { mode: 'view', fields, values: Object.fromEntries(vals.map(v => [v.field_id, v.value])) });
+    PdfView.mount($('#pdf-box'), plan.file_url, { mode: 'view', fields, values: Object.fromEntries(vals.map(v => [v.field_id, v.value])) })
+      .catch(x => { const box = $('#pdf-box', view); if (box) box.innerHTML = `<p class="err-box">${esc(friendlyAuthError(x))}</p>`; });
   },
 
   /* ---------- Plan-Editor ---------- */
   async editor(view, id, live) {
-    const [[plan]] = await Promise.all([DB.list('plans', { id })]);
+    let plan, player, fieldCount;
+    if (DEMO) {
+      [plan] = await DB.list('plans', { id });
+      player = plan && plan.player_id ? (await DB.list('players', { id: plan.player_id }))[0] : null;
+      fieldCount = plan ? (await DB.list('pdf_fields', { plan_id: id }, { select: 'id' })).length : 0;
+    } else {
+      // Plan + Spieler + Anzahl Felder in einer Anfrage
+      [plan] = await DB.list('plans', { id }, { select: '*,players(id,name),pdf_fields(id)' });
+      if (plan) { player = plan.players; fieldCount = (plan.pdf_fields || []).length; delete plan.players; delete plan.pdf_fields; }
+    }
     if (!plan) { view.innerHTML = '<div class="page"><p class="err-box">Plan nicht gefunden.</p></div>'; return; }
-    const [days, player, library] = await Promise.all([
-      DB.list('plan_days', { plan_id: id }, { order: 'sort' }),
-      plan.player_id ? DB.list('players', { id: plan.player_id }).then(r => r[0]) : null,
-      DB.list('content', { section: 'videos' }, { order: 'title' }),
-    ]);
-    const exs = await DB.list('exercises', { day_id: days.map(d => d.id) }, { order: 'sort' });
-    let fieldCount = plan.file_url ? (await DB.list('pdf_fields', { plan_id: id }, { select: 'id' })).length : 0;
+    // Trainingstage/Übungen werden im Editor nicht mehr bearbeitet
+    const days = [], exs = [], library = [];
     // Abgleich Übungen in der PDF ↔ Trainingsvideos (läuft im Hintergrund)
     let pvHtml = '<div class="spinner"></div>';
     const computeVideos = async () => {
@@ -654,11 +686,16 @@ const Admin = {
 
   /* ---------- Trainingsvideos ---------- */
   async content(view, section, live) {
-    const [items, players] = await Promise.all([
-      DB.list('content', { section }, { order: 'sort,-created_at' }),
-      DB.list('players', { active: true }, { order: 'name', select: 'id,name' }),
-    ]);
-    if (!live()) return;
+    await swr('videos', async () => {
+      const [items, players] = await Promise.all([
+        DB.list('content', { section }, { order: 'sort,-created_at' }),
+        DB.list('players', { active: true }, { order: 'name', select: 'id,name' }),
+      ]);
+      return { items, players };
+    }, d => this.drawContent(view, section, d), live);
+  },
+
+  drawContent(view, section, { items, players }) {
     const nameOf = id => (players.find(p => p.id === id) || {}).name || '?';
     const tools = c => `<div class="cc-tools">${c.audience && c.audience.length ? `<span class="pill" title="${esc(c.audience.map(nameOf).join(', '))}">${plural(c.audience.length, 'Spieler', 'Spieler')}</span>` : '<span class="pill">alle</span>'}
       <button class="icon-btn sm" data-edit="${c.id}" aria-label="Bearbeiten">${icon('edit')}</button><button class="icon-btn sm" data-del="${c.id}" aria-label="Löschen">${icon('trash')}</button></div>`;
