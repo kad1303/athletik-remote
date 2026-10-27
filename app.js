@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '23';
+const APP_VERSION = '24';
 
 // Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
 const DEMO_PARAM = new URLSearchParams(location.search).get('demo');
@@ -318,7 +318,12 @@ async function checkForUpdate() {
     if (tried.v === version && Date.now() - tried.t < 60000) return;
     sessionStorage.setItem('ar-update-tried', JSON.stringify({ v: version, t: Date.now() }));
     const reg = await navigator.serviceWorker?.getRegistration();
-    await reg?.update();
+    reg?.update().catch(() => {});
+    // Gespeicherte App-Dateien verwerfen → nach dem Neuladen holt der Service Worker die neue Version
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(k => k.startsWith('athletik-v')).map(k => caches.delete(k)));
+    }
     location.reload();
   } catch (e) {
     console.warn('Update-Prüfung fehlgeschlagen', e);
