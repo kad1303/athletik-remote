@@ -468,4 +468,4 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .pv-list li > .st { width: 20px; height: 20px; }
 .pv-list li span:last-child { display: grid; min-width: 0; }
 .pv-list strong { font-size: 0.9rem; }
-.seg + .pdf-box, .page > .seg { justify-self: start; }
+.page > .seg { justify-self: start; }

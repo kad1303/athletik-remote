@@ -25,15 +25,27 @@ const PdfView = {
     return pdfjsLib;
   },
 
+  // Hochgeladene PDFs ändern sich nie (jede Datei hat einen eigenen Namen) → im Gerät zwischenspeichern,
+  // dann öffnet der Plan beim zweiten Mal ohne erneuten Download
+  async bytes(url) {
+    const key = url.startsWith('file:') ? `/pdf-cache/${url.slice(5)}` : null;
+    const store = key && window.caches ? await caches.open('athletik-pdf').catch(() => null) : null;
+    const hit = store && await store.match(key);
+    if (hit) return hit.arrayBuffer();
+    const res = await fetch(await Media.href(url));
+    if (!res.ok) throw new Error('PDF nicht gefunden.');
+    const buf = await res.arrayBuffer();
+    if (store) store.put(key, new Response(buf.slice(0), { headers: { 'Content-Type': 'application/pdf' } })).catch(() => {});
+    return buf;
+  },
+
   // Jede PDF nur einmal laden (Anzeige und Video-Abgleich teilen sich das Dokument)
   docs: {},
   load(url) {
     if (!this.docs[url]) {
       this.docs[url] = (async () => {
-        const lib = await this.lib();
-        const res = await fetch(await Media.href(url));
-        if (!res.ok) throw new Error('PDF nicht gefunden.');
-        return lib.getDocument({ data: await res.arrayBuffer() }).promise;
+        const [lib, data] = await Promise.all([this.lib(), this.bytes(url)]);
+        return lib.getDocument({ data }).promise;
       })().catch(e => { delete this.docs[url]; throw e; });
     }
     return this.docs[url];
@@ -214,7 +226,8 @@ const PdfView = {
 
     const render = async () => {
       const width = Math.max(280, (scroll.clientWidth - 2) * st.zoom);
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // Schärfe passend zum Bildschirm, aber nicht unnötig riesig (sonst wird das Zeichnen langsam)
+      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2, 2600 / width));
       pagesEl.innerHTML = '';
       st.pages = [];
       for (let n = 1; n <= doc.numPages; n++) {

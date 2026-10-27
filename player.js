@@ -23,6 +23,8 @@ const Player = {
     const active = new Set(vals.filter(v => v.value).map(v => Dates.iso(new Date(v.updated_at))));
     const first = String(App.me.name || '').split(' ')[0];
     const hasPlan = plan && plan.file_url;
+    // Plan schon im Hintergrund laden, damit der Reiter „Plan“ sofort da ist
+    if (hasPlan) PdfView.load(plan.file_url).catch(() => {});
 
     view.innerHTML = `<div class="page narrow">
       ${PAGE_LOGO}

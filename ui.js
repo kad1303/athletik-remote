@@ -95,7 +95,16 @@ const Media = {
     const m = String(url).match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/))([\w-]{11})/);
     return m ? m[1] : null;
   },
-  async href(url) { return url.startsWith('file:') ? DB.fileUrl(url.slice(5)) : url; },
+  // Zeitlich begrenzte Links (3 h gültig) für 2 h wiederverwenden – spart bei jedem Antippen eine Anfrage
+  links: {},
+  async href(url) {
+    if (!url.startsWith('file:')) return url;
+    const c = this.links[url];
+    if (c && Date.now() - c.t < 2 * 3600e3) return c.href;
+    const href = await DB.fileUrl(url.slice(5));
+    this.links[url] = { href, t: Date.now() };
+    return href;
+  },
   label(url) {
     return { video: 'Video ansehen', image: 'Bild ansehen', pdf: 'PDF öffnen', file: 'Datei öffnen', link: 'Link öffnen' }[this.kind(url)] || 'Öffnen';
   },
@@ -115,7 +124,11 @@ const Media = {
       if (yt) box.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${yt}?rel=0&playsinline=1" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="${esc(title)}"></iframe>`;
       else if (vm) box.innerHTML = `<iframe src="https://player.vimeo.com/video/${vm[1]}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="${esc(title)}"></iframe>`;
       else if (kind === 'image') box.innerHTML = `<img src="${esc(await this.href(url))}" alt="${esc(title)}">`;
-      else box.innerHTML = `<video src="${esc(await this.href(url))}" controls playsinline preload="metadata"></video>`;
+      else {
+        box.innerHTML = `<video src="${esc(await this.href(url))}" controls playsinline autoplay preload="auto"></video>`;
+        const v = box.querySelector('video');
+        v.play().catch(() => {});   // startet sofort, wenn das Gerät es erlaubt
+      }
       box.classList.toggle('free', kind === 'image');
     } catch (e) {
       box.innerHTML = `<p class="muted">${esc(e.message)}</p>`;

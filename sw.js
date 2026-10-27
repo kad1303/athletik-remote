@@ -1,7 +1,7 @@
 // Service Worker: holt die App immer frisch aus dem Netz (damit Updates sofort ankommen)
 // und fällt nur ohne Netz auf die gespeicherte Kopie zurück.
 // Trainingsdaten werden NICHT gespeichert – Anfragen an Supabase laufen am Service Worker vorbei.
-const CACHE = 'athletik-v20';
+const CACHE = 'athletik-v21';
 const ASSETS = [
   './', './index.html', './styles.css', './config.js', './auth.js', './demo.js', './ui.js', './player.js', './pdfview.js', './admin.js', './app.js',
   './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/logo-skfb.png',
@@ -19,7 +19,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== 'athletik-pdf').map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -33,6 +33,11 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const key = req.mode === 'navigate' ? './index.html' : url.pathname;
+    // Bilder, Symbole, Muster-PDF: aus dem Speicher (ändern sich praktisch nie)
+    if (!/\.(js|css|html|webmanifest)$/.test(url.pathname) && req.mode !== 'navigate') {
+      const hit = await cache.match(key, { ignoreSearch: true });
+      if (hit) return hit;
+    }
     let res = null;
     try {
       res = await Promise.race([
