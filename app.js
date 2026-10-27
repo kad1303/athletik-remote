@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '25';
+const APP_VERSION = '26';
 
 // Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
 const DEMO_PARAM = new URLSearchParams(location.search).get('demo');
@@ -42,7 +42,7 @@ for (const m of ['insert', 'upsert', 'update', 'remove', 'upload']) {
 
 const TABS = {
   player: [['start', 'home', 'Start'], ['plan', 'file', 'Plan'], ['videos', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
-  admin: [['spieler', 'users', 'Spieler'], ['inhalte', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
+  admin: [['spieler', 'users', 'Spieler'], ['woche', 'calendar', 'Wochenplan'], ['inhalte', 'play', 'Trainingsvideos'], ['profil', 'user', 'Profil']],
 };
 
 function inviteUrl(code) { return `${location.origin}${location.pathname}#einladung=${code}`; }

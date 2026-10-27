@@ -32,6 +32,11 @@ const Dates = {
     if (n > 1 && n < 7) return `vor ${n} Tagen`;
     return this.short(s);
   },
+  kw(s) {   // Kalenderwoche nach ISO
+    const d = this.parse(this.add(s, 4 - this.weekday(s)));
+    const jan1 = new Date(d.getFullYear(), 0, 1);
+    return Math.floor((d - jan1) / 864e5 / 7) + 1;
+  },
   stamp(ts) { const d = new Date(ts); return `${d.getDate()}.${d.getMonth() + 1}. ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; },
 };
 
@@ -162,6 +167,7 @@ const ICONS = {
   file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
   wa: '<path d="M4 20l1.3-4A8 8 0 1 1 8 18.8z"/>',
   flame: '<path d="M12 3c1 4 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.5-3.5 2-5 1 1.5 2 2 2 2s-.5-4 1-7z"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/>',
 };

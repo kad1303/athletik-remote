@@ -16,9 +16,16 @@ const Player = {
     await this.withData(live, d => this.drawHome(view, d));
   },
 
-  drawHome(view, { plan, values: vals }) {
+  drawHome(view, { plan, values: vals, week: wp = [] }) {
     const today = Dates.today();
-    const week = Dates.week(today).slice(0, 5);
+    // Sonntags zeigt die Startseite schon die kommende Woche, sobald Alex sie eingetragen hat
+    let ws = Dates.monday(today);
+    const next = Dates.add(ws, 7);
+    const showNext = Dates.weekday(today) === 7 && wp.some(r => r.week_start === next);
+    if (showNext) ws = next;
+    const partOf = d => (wp.find(r => r.week_start === ws && r.weekday === Dates.weekday(d)) || {}).text || '';
+    // Mo–Fr, Samstag/Sonntag nur wenn dort etwas geplant ist
+    const week = Dates.week(ws).filter((d, i) => i < 5 || partOf(d));
     // Tage, an denen etwas in den Plan eingetragen wurde
     const active = new Set(vals.filter(v => v.value).map(v => Dates.iso(new Date(v.updated_at))));
     const first = String(App.me.name || '').split(' ')[0];
@@ -30,9 +37,9 @@ const Player = {
       ${PAGE_LOGO}
       <header class="page-head"><div><h1>Hallo ${esc(first)}</h1><p class="muted">${Dates.long(today)}</p></div></header>
       <section class="card">
-        <h2>Diese Woche</h2>
-        <div class="week5">${week.map(d => `<div class="wk-day ${d === today ? 'today' : ''} ${active.has(d) ? 'done' : ''}">
-          <span>${WD[Dates.weekday(d) - 1]}</span><strong>${Dates.parse(d).getDate()}</strong><i>${active.has(d) ? icon('check') : ''}</i></div>`).join('')}</div>
+        <h2>${showNext ? 'Nächste Woche' : 'Diese Woche'}</h2>
+        <div class="week5" style="--n:${week.length}">${week.map(d => `<div class="wk-day ${d === today ? 'today' : ''} ${active.has(d) ? 'done' : ''} ${partOf(d) ? 'has-part' : ''}">
+          <span>${WD[Dates.weekday(d) - 1]}</span><strong>${Dates.parse(d).getDate()}</strong>${partOf(d) ? `<em>${esc(partOf(d))}</em>` : ''}<i>${active.has(d) ? icon('check') : ''}</i></div>`).join('')}</div>
       </section>
       ${hasPlan ? `<a class="start-card" href="#/plan">
           <span class="eyebrow">Dein Trainingsplan</span>
@@ -61,6 +68,9 @@ const Player = {
   },
   async fresh() {
     let plan, fields, values;
+    // Wochenplan von Alex: diese und nächste Woche
+    const mon = Dates.monday(Dates.today());
+    const weekQ = DB.list('week_plans', { player_id: this.pid(), week_start: [mon, Dates.add(mon, 7)] }, { select: 'week_start,weekday,text' }).catch(() => []);
     if (DEMO) {
       [plan] = await DB.list('plans', { player_id: this.pid(), active: true }, { order: '-created_at', limit: 1 });
       fields = plan ? await DB.list('pdf_fields', { plan_id: plan.id }) : [];
@@ -76,11 +86,12 @@ const Player = {
       values = vals;
     }
     const ids = new Set(fields.map(f => f.id));
-    const d = { plan: plan || null, fields, values: values.filter(v => ids.has(v.field_id)).map(v => ({ field_id: v.field_id, value: v.value, updated_at: v.updated_at })) };
+    const week = (await weekQ).map(r => ({ week_start: r.week_start, weekday: r.weekday, text: r.text }));
+    const d = { plan: plan || null, fields, week, values: values.filter(v => ids.has(v.field_id)).map(v => ({ field_id: v.field_id, value: v.value, updated_at: v.updated_at })) };
     this.keep(d);
     return d;
   },
-  sig(d) { return JSON.stringify([d.plan && [d.plan.id, d.plan.title, d.plan.file_url, d.plan.notes], d.fields.map(f => f.id), d.values.map(v => [v.field_id, v.value])]); },
+  sig(d) { return JSON.stringify([d.plan && [d.plan.id, d.plan.title, d.plan.file_url, d.plan.notes], d.fields.map(f => f.id), d.values.map(v => [v.field_id, v.value]), d.week]); },
   // Zeichnet sofort aus dem Speicher und noch einmal, falls sich online etwas geändert hat
   async withData(live, draw) {
     const old = this.cached();
@@ -187,11 +198,73 @@ const Player = {
   drawVideos(view, items) {
     view.innerHTML = `<div class="page narrow">
       <header class="page-head"><div><h1>Trainingsvideos</h1></div></header>
-      ${items.length ? `<div class="content-list">${items.map(c => contentCard(c)).join('')}</div>` : `<section class="card empty">${icon('play', 'big')}<p class="muted">Hier ist noch nichts – Alex lädt bald Videos hoch.</p></section>`}
+      <section class="card upload-card">
+        <h2>Video an Alex schicken</h2>
+        <p class="muted small">Z. B. zur Technik-Kontrolle. Am besten kurz halten (max. ${MAX_UPLOAD_MB} MB).</p>
+        <form class="form" id="my-up">
+          <input name="title" placeholder="Worum geht's? z. B. Kniebeuge Satz 3">
+          <label class="btn block upload-btn">${icon('upload')} <span class="fname">Video auswählen</span><input type="file" name="file" accept="video/*" hidden></label>
+          <button class="btn primary block" type="submit" disabled>Senden</button>
+        </form>
+        <div id="my-videos"></div>
+      </section>
+      ${items.length ? videoGroups(items, c => contentCard(c)) : `<section class="card empty">${icon('play', 'big')}<p class="muted">Hier ist noch nichts – Alex lädt bald Videos hoch.</p></section>`}
     </div>`;
     bindContent(view);
+    this.bindUpload(view);
+  },
+
+  /* ---------- Eigene Videos an Alex ---------- */
+  async drawMyVideos(view) {
+    const box = $('#my-videos', view);
+    if (!box) return;
+    const list = await DB.list('player_videos', { player_id: this.pid() }, { order: '-created_at', limit: 20 }).catch(() => []);
+    if (!box.isConnected) return;
+    box.innerHTML = list.length ? `<h3 class="group-title">Deine Videos</h3><ul class="my-videos">${list.map(v => `<li>
+        <button class="chip-btn" data-video="${esc(v.url)}" data-title="${esc(v.title || 'Dein Video')}">${icon('play')} ${esc(v.title || 'Video')}</button>
+        <span class="muted small">${Dates.short(v.created_at)}${v.coach_seen ? ' · von Alex angesehen' : ''}</span></li>`).join('')}</ul>` : '';
+    bindContent(box);
+  },
+
+  bindUpload(view) {
+    const f = $('#my-up', view);
+    if (!f) return;
+    const inp = f.elements.file, btn = f.querySelector('[type=submit]');
+    inp.onchange = () => {
+      const file = inp.files[0];
+      if (file && file.size > MAX_UPLOAD_MB * 1048576) { toast(`Das Video ist größer als ${MAX_UPLOAD_MB} MB – bitte kürzer aufnehmen.`, 'err'); inp.value = ''; }
+      $('.fname', f).textContent = inp.files[0] ? inp.files[0].name : 'Video auswählen';
+      btn.disabled = !inp.files[0];
+    };
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const file = inp.files[0];
+      if (!file) return;
+      btn.disabled = true;
+      btn.textContent = 'Wird hochgeladen …';
+      try {
+        const url = await DB.upload(`spieler/${this.pid()}/${uuid()}-${safeName(file.name)}`, file);
+        await DB.insert('player_videos', { player_id: this.pid(), title: f.elements.title.value.trim() || null, url });
+        toast('Video ist bei Alex angekommen');
+        f.reset();
+        $('.fname', f).textContent = 'Video auswählen';
+        this.drawMyVideos(view);
+      } catch (x) { toast(friendlyAuthError(x), 'err'); }
+      btn.textContent = 'Senden';
+      btn.disabled = !inp.files[0];
+    };
+    this.drawMyVideos(view);
   },
 };
+
+// Feste Rubriken der Trainingsvideos (Reihenfolge = Anzeige)
+const VIDEO_CATS = ['Würfe und Sprünge', 'Prep', 'Krafttraining', 'Auxiliary', 'Bonus'];
+// Videos nach Rubriken gruppiert anzeigen; Videos ohne Rubrik landen unter „Weitere“
+function videoGroups(items, card) {
+  const groups = [...VIDEO_CATS, 'Weitere'].map(cat => [cat, items.filter(c => (VIDEO_CATS.includes(c.category) ? c.category : 'Weitere') === cat)]);
+  return groups.filter(([, list]) => list.length)
+    .map(([cat, list]) => `<section><h2 class="group-title">${esc(cat)}</h2><div class="content-list">${list.map(card).join('')}</div></section>`).join('');
+}
 
 // Video-Karte – auch in der Trainer-Ansicht benutzt
 function contentCard(c, adminTools = '') {

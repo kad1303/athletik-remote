@@ -16,7 +16,7 @@ const Demo = {
 
   load() {
     try { this.db = JSON.parse(localStorage.getItem(DEMO_KEY)); } catch { this.db = null; }
-    if (!this.db || this.db.v !== 6) this.db = this.seed();
+    if (!this.db || this.db.v !== 7) this.db = this.seed();
     return this;
   },
 
@@ -60,6 +60,7 @@ const Demo = {
     const base = { id: this.uid(), created_at: now };
     if (table === 'logs' || table === 'feedback' || table === 'plans') base.updated_at = now;
     if (table === 'feedback') Object.assign(base, { coach_seen: false, player_seen: true });
+    if (table === 'player_videos') base.coach_seen = false;
     return { ...base, ...row };
   },
 
@@ -232,12 +233,15 @@ const Demo = {
       feedback.push(fb);
     });
 
+    // Wochenplan von Alex für Lena: diese und nächste Woche
+    const week_plans = [0, 7].flatMap(off => [[1, 'Day 1'], [3, 'Day 2'], [5, 'Day 1 + Circuit']].map(([wd, text]) => ({ player_id: P.lena, week_start: iso(new Date(mon.getTime() + off * 864e5)), weekday: wd, text })));
+
     const content = [
     ];
 
     return {
-      v: 6,
-      players, invites, plans, plan_days: days, exercises, logs, feedback, content, pdf_fields, pdf_values,
+      v: 7,
+      players, invites, plans, plan_days: days, exercises, logs, feedback, content, pdf_fields, pdf_values, week_plans, player_videos: [],
       members: [
         { user_id: 'demo-admin', name: 'Alex', role: 'admin', player_id: null },
         { user_id: 'demo-player', name: 'Lena Hoffmann', role: 'player', player_id: P.lena },

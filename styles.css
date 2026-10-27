@@ -419,8 +419,8 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .pdf-layer { position: absolute; inset: 0; }
 .pdf-field {
   position: absolute; display: grid; place-items: center; overflow: hidden; white-space: nowrap; line-height: 1;
-  border: 1.5px solid rgba(36,86,224,0.75); background: rgba(36,86,224,0.10); border-radius: 3px;
-  color: #0b2a8a; font-weight: 800; font-family: var(--font); cursor: pointer; user-select: none; -webkit-user-select: none;
+  border: 1px solid rgba(36,86,224,0.75); background: rgba(36,86,224,0.10); border-radius: 2px;
+  color: #0b2a8a; font-weight: 700; font-family: var(--font); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; cursor: pointer; user-select: none; -webkit-user-select: none;
 }
 .pdf-field.filled { background: rgba(36,86,224,0.04); }
 .pdf-field.check.filled { color: #0b2a8a; }
@@ -441,7 +441,8 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .pdf-handle::after { content: ""; position: absolute; inset: -10px; }   /* größere Tippfläche */
 
 /* ---------- Spieler-Start ---------- */
-.week5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.week5 { display: grid; grid-template-columns: repeat(var(--n, 5), 1fr); gap: 6px; }
+.wk-day em { font-style: normal; font-size: 0.68rem; font-weight: 700; line-height: 1.15; text-align: center; color: var(--ink); background: var(--accent-wash); border-radius: 6px; padding: 3px 4px; margin-top: 2px; max-width: 100%; overflow-wrap: anywhere; }
 .wk-day { display: grid; justify-items: center; gap: 2px; padding: 10px 4px 8px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--line); }
 .wk-day span { font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .wk-day strong { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -469,3 +470,21 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .pv-list li span:last-child { display: grid; min-width: 0; }
 .pv-list strong { font-size: 0.9rem; }
 .page > .seg { justify-self: start; }
+
+/* ---------- Wochenplan (Trainer) ---------- */
+.week-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.week-nav strong { font-variant-numeric: tabular-nums; }
+.wp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
+.wp-table { border-collapse: collapse; width: 100%; min-width: 760px; }
+.wp-table th, .wp-table td { border-bottom: 1px solid var(--line); padding: 6px; text-align: left; }
+.wp-table thead th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; }
+.wp-table thead th span { display: block; font-size: 0.9rem; color: var(--ink); letter-spacing: 0; }
+.wp-table thead th.today, .wp-table thead th.today span { color: var(--accent); }
+.wp-table tbody th { position: sticky; left: 0; background: var(--card); font-weight: 700; white-space: nowrap; padding-right: 12px; z-index: 1; }
+.wp-table tbody tr:last-child th, .wp-table tbody tr:last-child td { border-bottom: 0; }
+.wp-table input { padding: 8px; font-size: 0.9rem; min-width: 84px; }
+
+/* ---------- Videos von Spielern ---------- */
+.my-videos { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.my-videos li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.upload-card h3.group-title { margin-top: 6px; }

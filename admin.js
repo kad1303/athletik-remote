@@ -12,6 +12,7 @@ const Admin = {
     return {
       spieler: (v, a, live) => a[0] ? this.player(v, a[0], live) : this.players(v, live),
       plan: (v, a, live) => this.editor(v, a[0], live),
+      woche: (v, a, live) => this.week(v, a[0], live),
       pdf: (v, a, live) => this.pdfFilled(v, a[0], live),
       feedback: (v, a, live) => this.feedback(v, live),
       plaene: (v, a, live) => this.templates(v, live),
@@ -31,18 +32,19 @@ const Admin = {
   /* ---------- Spielerliste ---------- */
   async players(view, live) {
     await swr('spieler', async () => {
-      const [players, plans, invites, vals] = await Promise.all([
+      const [players, plans, invites, vals, newVids] = await Promise.all([
         DB.list('players', {}, { order: 'name' }),
         DB.list('plans', { active: true, player_id: { not: 'is.null' } }, { select: 'id,player_id,title,file_url' }),
         DB.list('invites', { used_at: null, role: 'player' }, { select: 'player_id' }),
         // Letzter Eintrag in der Plan-PDF je Spieler
         DB.list('pdf_values', {}, { select: 'player_id,updated_at', order: '-updated_at', limit: 1000 }),
+        DB.list('player_videos', { coach_seen: false }, { select: 'player_id' }).catch(() => []),
       ]);
-      return { players, plans, invites, vals };
+      return { players, plans, invites, vals, newVids };
     }, d => this.drawPlayers(view, d), live);
   },
 
-  drawPlayers(view, { players, plans, invites, vals }) {
+  drawPlayers(view, { players, plans, invites, vals, newVids = [] }) {
     const active = players.filter(p => p.active);
     const archived = players.filter(p => !p.active);
 
@@ -54,7 +56,7 @@ const Admin = {
       return `<a class="card player-card" href="#/spieler/${p.id}">
         <span class="avatar">${esc(initials(p.name))}</span>
         <div class="pc-main">
-          <div class="pc-name"><strong>${esc(p.name)}</strong>${access}</div>
+          <div class="pc-name"><strong>${esc(p.name)}</strong>${newVids.some(v => v.player_id === p.id) ? '<span class="pill accent">neues Video</span>' : ''}${access}</div>
           <span class="muted small">${esc(p.sport || '')}${p.sport ? ' · ' : ''}${planText}</span>
           <span class="small muted">${last ? `zuletzt eingetragen ${Dates.relative(last.updated_at.slice(0, 10))}` : 'noch nichts eingetragen'}</span>
         </div>${icon('next')}</a>`;
@@ -105,7 +107,29 @@ const Admin = {
         DB.list('invites', { player_id: id, used_at: null }, { order: '-created_at' }),
       ]);
       return { p: p || null, plans, invites };
-    }, d => this.drawPlayer(view, d), live);
+    }, d => { this.drawPlayer(view, d); this.drawPlayerVideos(view, id); }, live);
+  },
+
+  // Videos, die der Spieler an Alex geschickt hat (neu = noch nicht angesehen)
+  async drawPlayerVideos(view, id) {
+    const list = await DB.list('player_videos', { player_id: id }, { order: '-created_at', limit: 30 }).catch(() => []);
+    const page = $('.page', view);
+    if (!page || !page.isConnected || !list.length) return;
+    $('#pvids', view)?.remove();
+    page.insertAdjacentHTML('beforeend', `<section class="card" id="pvids"><h2>Videos vom Spieler</h2>
+      <ul class="my-videos">${list.map(v => `<li class="${v.coach_seen ? '' : 'new'}">
+        <button class="chip-btn" data-pv="${v.id}" data-video="${esc(v.url)}" data-title="${esc(v.title || 'Video')}">${icon('play')} ${esc(v.title || 'Video')}</button>
+        <span class="muted small">${Dates.short(v.created_at)}</span>${v.coach_seen ? '' : '<span class="pill accent">neu</span>'}</li>`).join('')}</ul></section>`);
+    $$('#pvids [data-video]', view).forEach(b => b.onclick = async () => {
+      Media.open(b.dataset.video, b.dataset.title);
+      const v = list.find(x => x.id === b.dataset.pv);
+      if (v && !v.coach_seen) {
+        v.coach_seen = true;
+        b.closest('li').classList.remove('new');
+        b.closest('li').querySelector('.pill')?.remove();
+        DB.update('player_videos', v.id, { coach_seen: true }).catch(() => {});
+      }
+    });
   },
 
   drawPlayer(view, { p, plans, invites }) {
@@ -204,33 +228,19 @@ const Admin = {
     };
   },
 
-  async newPlan(p, plans) {
-    const [templates, others] = await Promise.all([
-      DB.list('plans', { player_id: null }, { order: 'title' }),
-      DB.list('plans', { active: true, player_id: { not: 'is.null' } }, { order: 'title' }),
-    ]);
-    const players = await DB.list('players', { id: others.map(o => o.player_id) }, { select: 'id,name' });
-    const nameOf = id => (players.find(x => x.id === id) || {}).name || '';
-    const sources = [
-      ...templates.map(t => [t.id, `Vorlage: ${t.title}`]),
-      ...others.filter(o => o.player_id !== p.id).map(o => [o.id, `${nameOf(o.player_id)}: ${o.title}`]),
-      ...plans.map(o => [o.id, `Bisher: ${o.title}`]),
-    ];
+  newPlan(p, plans) {
     const s = openSheet(`<h2>Neuer Plan für ${esc(p.name)}</h2>
       <form class="form" id="npf">
         <label>Name des Plans<input name="title" placeholder="z. B. Wintervorbereitung Block 2" required></label>
-        <label>Start (Montag)<input name="start" type="date" value="${Dates.monday(Dates.add(Dates.today(), 7))}"></label>
-        <label>Dauer in Wochen<input name="weeks" type="number" min="1" max="52" value="6"></label>
-        <label>Grundlage<select name="src"><option value="">Leerer Plan</option>${sources.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></label>
-        <label class="btn block upload-btn">${icon('file')} <span class="fname">Plan als PDF hochladen (optional)</span><input type="file" name="pdf" accept="application/pdf,.pdf" hidden></label>
-        <p class="muted small">Der neue Plan wird sofort aktiv, der bisherige wandert zu „Frühere Pläne“ (Einträge bleiben erhalten). Mit PDF kannst du die Übungen auch weglassen – dann sieht der Spieler nur das PDF.</p>
+        <label class="btn block upload-btn">${icon('file')} <span class="fname">Plan als PDF hochladen</span><input type="file" name="pdf" accept="application/pdf,.pdf" hidden></label>
+        <p class="muted small">Der neue Plan wird sofort aktiv, der bisherige wandert zu „Frühere Pläne“ (Einträge bleiben erhalten). Die Felder zum Ausfüllen werden automatisch gesetzt.</p>
         <button class="btn primary block" type="submit">Plan anlegen</button>
       </form>`);
     const pdfInput = s.querySelector('input[name=pdf]');
     pdfInput.onchange = () => {
       const file = pdfInput.files[0];
       if (file && !checkPdf(file)) { pdfInput.value = ''; return; }
-      s.querySelector('.fname').textContent = file ? file.name : 'Plan als PDF hochladen (optional)';
+      s.querySelector('.fname').textContent = file ? file.name : 'Plan als PDF hochladen';
       const t = s.querySelector('input[name=title]');
       if (file && !t.value) t.value = file.name.replace(/\.pdf$/i, '');
     };
@@ -239,13 +249,13 @@ const Admin = {
       const f = e.target.elements;
       e.target.querySelector("[type=submit]").disabled = true;
       try {
-        const over = { title: f.title.value.trim(), start_date: f.start.value || null, weeks: +f.weeks.value || null };
+        const over = { title: f.title.value.trim() };
         if (pdfInput.files[0]) {
           toast('PDF wird hochgeladen …');
           over.file_url = await DB.upload(`plaene/${uuid()}-${safeName(pdfInput.files[0].name)}`, pdfInput.files[0]);
         }
         for (const x of plans.filter(x => x.active)) await DB.update('plans', x.id, { active: false });
-        const plan = f.src.value ? await this.copyPlan(f.src.value, p.id, over) : await DB.insert('plans', { player_id: p.id, active: true, notes: '', ...over });
+        const plan = await DB.insert('plans', { player_id: p.id, active: true, notes: '', ...over });
         if (over.file_url) {
           toast('Felder werden erkannt …');
           const n = await this.autoFields(plan.id, over.file_url);
@@ -376,6 +386,60 @@ const Admin = {
     };
   },
 
+  /* ---------- Wochenplan: welcher Teil des Plans an welchem Tag ---------- */
+  async week(view, start, live) {
+    const today = Dates.today();
+    // Ab Samstag wird schon die kommende Woche geplant
+    const ws = start && /^\d{4}-\d{2}-\d{2}$/.test(start) ? Dates.monday(start) : Dates.monday(Dates.weekday(today) >= 6 ? Dates.add(today, 7) : today);
+    const [players, rows] = await Promise.all([
+      DB.list('players', { active: true }, { order: 'name', select: 'id,name' }),
+      DB.list('week_plans', { week_start: ws }),
+    ]);
+    if (!live()) return;
+    const days = Dates.week(ws);
+    const val = (pid, wd) => (rows.find(r => r.player_id === pid && r.weekday === wd) || {}).text || '';
+    const d0 = Dates.parse(days[0]), d6 = Dates.parse(days[6]);
+    view.innerHTML = `<div class="page">
+      <header class="page-head"><div><h1>Wochenplan</h1><p class="muted">Was jeder Spieler an welchem Tag macht – sehen die Spieler auf ihrer Startseite.</p></div></header>
+      <div class="week-nav">
+        <a class="icon-btn" href="#/woche/${Dates.add(ws, -7)}" aria-label="Vorige Woche">${icon('back')}</a>
+        <strong>KW ${Dates.kw(ws)} · ${d0.getDate()}.${d0.getMonth() + 1}. – ${d6.getDate()}.${d6.getMonth() + 1}.${d6.getFullYear()}</strong>
+        <a class="icon-btn" href="#/woche/${Dates.add(ws, 7)}" aria-label="Nächste Woche">${icon('next')}</a>
+        <button class="btn small" id="copy-week">${icon('copy')} Wie Vorwoche</button>
+        <span class="save-state" id="save-state"></span>
+      </div>
+      ${players.length ? `<div class="wp-scroll"><table class="wp-table">
+        <thead><tr><th>Spieler</th>${days.map(d => `<th class="${d === today ? 'today' : ''}">${WD[Dates.weekday(d) - 1]}<span>${Dates.parse(d).getDate()}.</span></th>`).join('')}</tr></thead>
+        <tbody>${players.map(p => `<tr><th>${esc(p.name)}</th>${days.map((d, i) => `<td><input list="wp-parts" data-p="${p.id}" data-wd="${i + 1}" value="${esc(val(p.id, i + 1))}" aria-label="${esc(p.name)} ${WD_LONG[i]}"></td>`).join('')}</tr>`).join('')}</tbody>
+      </table></div>
+      <datalist id="wp-parts"><option>Day 1</option><option>Day 2</option><option>Day 3</option><option>Day 1 + Circuit</option><option>Day 2 + Circuit</option><option>Circuit</option><option>Frei</option></datalist>
+      <p class="muted small">Einfach eintippen oder aus der Liste wählen – wird sofort gespeichert. Leeres Feld = nichts geplant.</p>`
+      : '<section class="card empty"><p class="muted">Noch keine aktiven Spieler.</p></section>'}
+    </div>`;
+    const st = $('#save-state', view);
+    const save = async inp => {
+      const row = { player_id: inp.dataset.p, week_start: ws, weekday: +inp.dataset.wd };
+      const text = inp.value.trim();
+      st.textContent = 'Speichert …'; st.className = 'save-state';
+      try {
+        if (text) await DB.upsert('week_plans', { ...row, text, updated_at: new Date().toISOString() }, 'player_id,week_start,weekday');
+        else await DB.remove('week_plans', row);
+        st.textContent = 'Gespeichert'; st.className = 'save-state ok';
+      } catch (x) { st.textContent = 'Nicht gespeichert'; st.className = 'save-state bad'; toast(friendlyAuthError(x), 'err'); }
+    };
+    $$('.wp-table input', view).forEach(inp => { inp.onchange = () => save(inp); });
+    const copy = $('#copy-week', view);
+    if (copy) copy.onclick = async () => {
+      if (rows.length && !(await confirmSheet('Diese Woche mit der Vorwoche überschreiben?', 'Übernehmen'))) return;
+      const prev = await DB.list('week_plans', { week_start: Dates.add(ws, -7) });
+      if (!prev.length) { toast('In der Vorwoche ist nichts eingetragen.'); return; }
+      await DB.remove('week_plans', { week_start: ws });
+      await DB.upsert('week_plans', prev.map(r => ({ player_id: r.player_id, week_start: ws, weekday: r.weekday, text: r.text, updated_at: new Date().toISOString() })), 'player_id,week_start,weekday');
+      toast('Vorwoche übernommen');
+      route();
+    };
+  },
+
   /* ---------- Ausgefüllte Plan-PDF eines Spielers ---------- */
   async pdfFilled(view, id, live) {
     await swr(`pdf:${id}`, async () => {
@@ -493,8 +557,6 @@ const Admin = {
         </header>
         <section class="card form">
           <label>Name des Plans<input data-p="title" value="${esc(S.plan.title)}"></label>
-          ${player ? `<div class="two"><label>Start<input data-p="start_date" type="date" value="${esc(S.plan.start_date || '')}"></label>
-            <label>Wochen<input data-p="weeks" type="number" min="1" max="52" value="${esc(S.plan.weeks || '')}"></label></div>` : ''}
           <label>Hinweise für den Spieler<textarea data-p="notes" rows="2" placeholder="z. B. Aufwärmen, worauf achten, Ziel des Blocks">${esc(S.plan.notes || '')}</textarea></label>
           ${player ? `<label class="check-line"><input type="checkbox" data-p="active" ${S.plan.active ? 'checked' : ''}> Aktiver Plan (sieht der Spieler)</label>` : ''}
         </section>
@@ -702,7 +764,7 @@ const Admin = {
     view.innerHTML = `<div class="page narrow">
       <header class="page-head"><div><h1>Trainingsvideos</h1></div>
         <button class="btn primary" id="add">${icon('plus')} Video</button></header>
-      ${items.length ? `<div class="content-list">${items.map(c => contentCard(c, tools(c))).join('')}</div>` : '<section class="card empty"><p class="muted">Noch keine Videos hochgeladen.</p></section>'}
+      ${items.length ? videoGroups(items, c => contentCard(c, tools(c))) : '<section class="card empty"><p class="muted">Noch keine Videos hochgeladen.</p></section>'}
     </div>`;
     bindContent(view);
     $('#add').onclick = () => this.editContent({ section }, items, players);
@@ -720,7 +782,8 @@ const Admin = {
     const aud = c.audience || [];
     const s = openSheet(`<h2>${c.id ? 'Video bearbeiten' : 'Neues Video'}</h2>
       <form class="form" id="cf">
-        <label>Titel<input name="title" value="${esc(c.title || '')}" required></label>
+        <label>Rubrik<select name="category" required><option value="">– bitte wählen –</option>${VIDEO_CATS.map(x => `<option ${c.category === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+        <label>Titel<input name="title" value="${esc(c.title || '')}" required placeholder="Wie die Übung im Plan, z. B. Trap Bar Deadlift"></label>
         <label>Text (optional)<textarea name="body" rows="4">${esc(c.body || '')}</textarea></label>
         <label>Link (YouTube, Vimeo, Webseite …)<input name="url" value="${esc(c.url && !c.url.startsWith('file:') ? c.url : '')}" placeholder="https://"></label>
         <label class="btn block upload-btn">${icon('upload')} <span id="fname">${c.url && c.url.startsWith('file:') ? esc(c.url.split('/').pop().replace(/^[\w-]{36}-/, '')) : `Oder Video hochladen (max. ${MAX_UPLOAD_MB} MB)`}</span><input type="file" name="file" accept="video/*" hidden></label>
@@ -752,7 +815,7 @@ const Admin = {
         }
         const who = $$('input[name=who]:checked', f).map(x => x.value);
         const row = {
-          section: 'videos', title: el.title.value.trim(),
+          section: 'videos', category: el.category.value, title: el.title.value.trim(),
           body: el.body.value.trim(), url: url || null, audience: el.aud.value === 'some' && who.length ? who : null,
         };
         if (c.id) await DB.update('content', c.id, row);

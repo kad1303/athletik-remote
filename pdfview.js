@@ -213,7 +213,12 @@ const PdfView = {
       return `<div class="pdf-field ${f.kind} ${v ? 'filled' : ''} ${st.selected === f.id ? 'sel' : ''}" data-fid="${f.id}"
         style="left:${f.x * 100}%;top:${f.y * 100}%;width:${f.w * 100}%;height:${f.h * 100}%">${text || (editing ? `<i>${f.kind === 'check' ? '' : FIELD_LABEL[f.kind]}</i>` : '')}${editing && st.selected === f.id ? '<span class="pdf-handle" title="Ziehen = Größe ändern"></span>' : ''}</div>`;
     };
-    const fitFont = el => { el.style.fontSize = `${Math.max(9, el.offsetHeight * 0.72)}px`; };
+    // Schrift passt in Höhe UND Breite des Feldes (auch bei kleinen Feldern auf dem Handy)
+    const fitFont = el => {
+      const len = Math.max(1, (el.textContent || '').trim().length);
+      const size = Math.min(el.offsetHeight * 0.78, el.offsetWidth / (len * 0.62 + 0.4));
+      el.style.fontSize = `${Math.max(4, size)}px`;
+    };
     const drawFields = () => {
       st.pages.forEach(p => {
         p.layer.innerHTML = fields.filter(f => f.page === p.n).map(fieldHtml).join('');
@@ -252,8 +257,6 @@ const PdfView = {
       $('#zoom-val', box).textContent = `${Math.round(st.zoom * 100)} %`;
       drawFields();
     };
-    // Auf dem Handy etwas größer starten, damit die Felder gut zu treffen sind
-    if (scroll.clientWidth < 500) st.zoom = 1.5;
     await render();
 
     // Ausfüllbare PDF? Dann Formularfelder anbieten
@@ -422,7 +425,7 @@ const PdfView = {
         const inp = s.querySelector('input');
         setTimeout(() => { inp.focus(); inp.select(); }, 50);
         const set = v => { values[f.id] = v; closeSheet(); drawFields(); opts.onValue(f, v); };
-        s.querySelector('#pv').onsubmit = ev => { ev.preventDefault(); set(f.kind === 'kg' ? inp.value.trim().replace('.', ',') : inp.value.trim()); };
+        s.querySelector('#pv').onsubmit = ev => { ev.preventDefault(); set(f.kind === 'kg' ? formatKg(inp.value) : inp.value.trim()); };
         s.querySelector('[data-clear]').onclick = () => set('');
       });
     }
@@ -490,3 +493,10 @@ const PlanVideos = {
     });
   },
 };
+
+// Gewicht einheitlich: „62.5 kg“ → „62,5“, „60,0“ → „60“
+function formatKg(v) {
+  let s = String(v || '').trim().replace(/\s*kg\.?$/i, '').replace(/\s+/g, '').replace('.', ',');
+  if (/^\d+,0+$/.test(s)) s = s.replace(/,0+$/, '');
+  return s;
+}
