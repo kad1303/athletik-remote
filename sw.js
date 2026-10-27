@@ -1,19 +1,32 @@
-// Service Worker: holt die App immer frisch aus dem Netz (damit Updates sofort ankommen)
-// und fällt nur ohne Netz auf die gespeicherte Kopie zurück.
+// Service Worker: Die App-Dateien kommen sofort aus dem Gerät (schneller Start).
+// Neu geladen wird nur, wenn es eine neue Version gibt: app.js vergleicht version.json,
+// leert dann diesen Speicher und lädt neu – dann holt der Service Worker alles frisch.
 // Trainingsdaten werden NICHT gespeichert – Anfragen an Supabase laufen am Service Worker vorbei.
-const CACHE = 'athletik-v23';
+const CACHE = 'athletik-v24';
 const ASSETS = [
   './', './index.html', './styles.css', './config.js', './auth.js', './demo.js', './ui.js', './player.js', './pdfview.js', './admin.js', './app.js',
   './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/logo-skfb.png',
 ];
-const NETWORK_TIMEOUT_MS = 4000;
+const NETWORK_TIMEOUT_MS = 8000;
+
+// Frisch vom Server holen – der Zufalls-Parameter umgeht den Zwischenspeicher von GitHub (bis 10 Min. alt)
+function fresh(path) {
+  return Promise.race([
+    fetch(`${path}${path.includes('?') ? '&' : '?'}_=${Date.now()}`, { cache: 'no-store' }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), NETWORK_TIMEOUT_MS)),
+  ]);
+}
+const keyOf = (url) => new URL(url, self.registration.scope).pathname.replace(/\/$/, '/index.html');
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE)
-      .then((c) => c.addAll(ASSETS.map((a) => new Request(a, { cache: 'reload' }))))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    await Promise.all(ASSETS.map(async (a) => {
+      const res = await fresh(new URL(a, self.registration.scope).pathname);
+      if (res.ok) await cache.put(keyOf(a), res);
+    }));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
@@ -32,27 +45,15 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    const key = req.mode === 'navigate' ? './index.html' : url.pathname;
-    // Bilder, Symbole, Muster-PDF: aus dem Speicher (ändern sich praktisch nie)
-    if (!/\.(js|css|html|webmanifest)$/.test(url.pathname) && req.mode !== 'navigate') {
-      const hit = await cache.match(key, { ignoreSearch: true });
-      if (hit) return hit;
-    }
-    let res = null;
+    const key = req.mode === 'navigate' ? keyOf('./index.html') : url.pathname;
+    const hit = await cache.match(key, { ignoreSearch: true });
+    if (hit) return hit;
     try {
-      res = await Promise.race([
-        // Zufalls-Parameter umgeht den Zwischenspeicher von GitHub (bis 10 Min.) – Updates kommen sofort an
-        fetch(`${url.origin}${url.pathname}?_=${Date.now()}`, { cache: 'no-store' }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), NETWORK_TIMEOUT_MS)),
-      ]);
-      if (res.ok) {
-        cache.put(key, res.clone());
-        return res;
-      }
+      const res = await fresh(url.pathname);
+      if (res.ok) cache.put(key, res.clone());
+      return res;
     } catch {
-      // offline oder zu langsam → gespeicherte Kopie
+      return Response.error();
     }
-    const cached = await cache.match(key, { ignoreSearch: true });
-    return cached || res || Response.error();
   })());
 });
