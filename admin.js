@@ -38,14 +38,15 @@ const Admin = {
         DB.list('invites', { used_at: null, role: 'player' }, { select: 'player_id' }),
         // Letzter Eintrag in der Plan-PDF je Spieler
         DB.list('pdf_values', {}, { select: 'player_id,updated_at', order: '-updated_at', limit: 1000 }),
-        DB.list('player_videos', { coach_seen: false }, { select: 'player_id' }).catch(() => []),
-        DB.list('feedback', { coach_seen: false }, { select: 'player_id' }).catch(() => []),
+        DB.list('player_videos', { coach_seen: false }, { select: 'id,player_id,title,created_at', order: '-created_at' }).catch(() => []),
+        DB.list('feedback', { coach_seen: false }, { select: 'id,player_id,date,day_title,rpe,duration_min,text', order: '-date' }).catch(() => []),
       ]);
       return { players, plans, invites, vals, newVids, newFb };
     }, d => this.drawPlayers(view, d), live);
   },
 
   drawPlayers(view, { players, plans, invites, vals, newVids = [], newFb = [] }) {
+    const nameOf = id => (players.find(p => p.id === id) || {}).name || 'Spieler';
     const active = players.filter(p => p.active);
     const archived = players.filter(p => !p.active);
 
@@ -66,6 +67,13 @@ const Admin = {
     view.innerHTML = `<div class="page">
       <header class="page-head"><div><h1>Spieler</h1><p class="muted">${plural(active.length, 'aktiver Spieler', 'aktive Spieler')}</p></div>
         <button class="btn primary" id="add">${icon('plus')} Spieler</button></header>
+      ${newFb.length || newVids.length ? `<section class="card inbox">
+        <h2>Neu von den Spielern</h2>
+        <ul class="inbox-list">
+          ${newFb.map(f => `<li><a href="#/spieler/${f.player_id}">${icon('msg')}<span><strong>${esc(nameOf(f.player_id))}</strong> · Feedback ${Dates.short(f.date)}${f.day_title && f.day_title !== 'Training' ? ` (${esc(f.day_title)})` : ''}<small class="muted">${[f.duration_min ? `${f.duration_min} Min.` : '', f.rpe != null ? `Intensität ${f.rpe}/10` : '', f.text ? esc(f.text.slice(0, 80)) + (f.text.length > 80 ? ' …' : '') : ''].filter(Boolean).join(' · ')}</small></span>${icon('next')}</a></li>`).join('')}
+          ${newVids.map(v => `<li><a href="#/spieler/${v.player_id}">${icon('play')}<span><strong>${esc(nameOf(v.player_id))}</strong> · Video ${Dates.short(v.created_at)}<small class="muted">${esc(v.title || 'ohne Kommentar')}</small></span>${icon('next')}</a></li>`).join('')}
+        </ul>
+      </section>` : ''}
       <div class="player-grid">${active.map(card).join('') || '<section class="card empty"><p class="muted">Noch keine Spieler. Leg den ersten an und schick ihm den Einladungslink per WhatsApp.</p></section>'}</div>
       ${archived.length ? `<details class="archive"><summary>Archiv (${archived.length})</summary><div class="player-grid">${archived.map(card).join('')}</div></details>` : ''}
     </div>`;
@@ -114,11 +122,11 @@ const Admin = {
   // Feedback nach Einheiten (Dauer, Intensität 0–10, Kommentar); beim Ansehen als gelesen markieren
   async drawPlayerFeedback(view, id) {
     const list = await DB.list('feedback', { player_id: id }, { order: '-date,-created_at', limit: 30 }).catch(() => []);
-    const page = $('.page', view);
-    if (!page || !page.isConnected) return;
+    const anchor = $('#access', view);
+    if (!anchor || !anchor.isConnected) return;
     $('#pfb', view)?.remove();
     const hot = r => r >= 9 ? 'hot' : r >= 7 ? 'warm' : '';
-    page.insertAdjacentHTML('beforeend', `<section class="card" id="pfb"><h2>Feedback zu Einheiten</h2>
+    anchor.insertAdjacentHTML('beforebegin', `<section class="card" id="pfb"><h2>Feedback zu Einheiten</h2>
       ${list.length ? `<ul class="fb-list">${list.map(f => `<li class="${f.coach_seen ? '' : 'new'}">
         <div class="fb-meta"><strong>${Dates.short(f.date)}</strong>${f.day_title ? `<span class="muted small">${esc(f.day_title)}</span>` : ''}
           ${f.duration_min ? `<span class="pill">${f.duration_min} Min.</span>` : ''}${f.rpe != null ? `<span class="pill ${hot(f.rpe)}">Intensität ${f.rpe}/10</span>` : ''}${f.coach_seen ? '' : '<span class="pill accent">neu</span>'}</div>
@@ -131,10 +139,10 @@ const Admin = {
   // Videos, die der Spieler an Alex geschickt hat (neu = noch nicht angesehen)
   async drawPlayerVideos(view, id) {
     const list = await DB.list('player_videos', { player_id: id }, { order: '-created_at', limit: 30 }).catch(() => []);
-    const page = $('.page', view);
-    if (!page || !page.isConnected || !list.length) return;
+    const anchor = $('#access', view);
+    if (!anchor || !anchor.isConnected || !list.length) return;
     $('#pvids', view)?.remove();
-    page.insertAdjacentHTML('beforeend', `<section class="card" id="pvids"><h2>Videos vom Spieler</h2>
+    anchor.insertAdjacentHTML('beforebegin', `<section class="card" id="pvids"><h2>Videos vom Spieler</h2>
       <ul class="my-videos">${list.map(v => `<li class="${v.coach_seen ? '' : 'new'}">
         <button class="chip-btn" data-pv="${v.id}" data-video="${esc(v.url)}" data-title="${esc(v.title || 'Video')}">${icon('play')} ${esc(v.title || 'Video')}</button>
         <span class="muted small">${Dates.short(v.created_at)}</span>${v.coach_seen ? '' : '<span class="pill accent">neu</span>'}</li>`).join('')}</ul></section>`);
@@ -181,7 +189,7 @@ const Admin = {
           ${plans.filter(x => !x.active).map(x => `<div class="older-row"><a href="#/plan/${x.id}">${esc(x.title)}</a><span class="muted small">${Dates.short(x.created_at)}</span><button class="btn small" data-act="activate" data-id="${x.id}">Aktivieren</button></div>`).join('')}
         </details>` : ''}
       </section>
-      <section class="card">
+      <section class="card" id="access">
         <div class="card-head"><h2>Zugang</h2></div>
         ${access}
       </section>
@@ -409,16 +417,19 @@ const Admin = {
     const today = Dates.today();
     // Ab Samstag wird schon die kommende Woche geplant
     const ws = start && /^\d{4}-\d{2}-\d{2}$/.test(start) ? Dates.monday(start) : Dates.monday(Dates.weekday(today) >= 6 ? Dates.add(today, 7) : today);
-    const [players, rows] = await Promise.all([
+    const days = Dates.week(ws);
+    const [players, rows, fbs] = await Promise.all([
       DB.list('players', { active: true }, { order: 'name', select: 'id,name' }),
       DB.list('week_plans', { week_start: ws }),
+      // Feedback der Spieler zu den Einheiten dieser Woche – erscheint direkt beim Tag
+      DB.list('feedback', { date: { gte: days[0], lte: days[6] } }, { select: 'player_id,date,rpe,duration_min,text,coach_seen' }).catch(() => []),
     ]);
     if (!live()) return;
-    const days = Dates.week(ws);
     const val = (pid, wd) => (rows.find(r => r.player_id === pid && r.weekday === wd) || {}).text || '';
+    const fbOf = (pid, d) => fbs.filter(f => f.player_id === pid && f.date === d);
     const d0 = Dates.parse(days[0]), d6 = Dates.parse(days[6]);
-    view.innerHTML = `<div class="page">
-      <header class="page-head"><div><h1>Wochenplan</h1><p class="muted">Was jeder Spieler an welchem Tag macht – sehen die Spieler auf ihrer Startseite.</p></div></header>
+    view.innerHTML = `<div class="page wide">
+      <header class="page-head"><div><h1>Wochenplan</h1><p class="muted">Was jeder Spieler an welchem Tag macht – sehen die Spieler auf ihrer Startseite. Darunter erscheint ihr Feedback zur Einheit.</p></div></header>
       <div class="week-nav">
         <a class="icon-btn" href="#/woche/${Dates.add(ws, -7)}" aria-label="Vorige Woche">${icon('back')}</a>
         <strong>KW ${Dates.kw(ws)} · ${d0.getDate()}.${d0.getMonth() + 1}. – ${d6.getDate()}.${d6.getMonth() + 1}.${d6.getFullYear()}</strong>
@@ -426,12 +437,17 @@ const Admin = {
         <span class="save-state" id="save-state"></span>
       </div>
       ${players.length ? `<div class="wp-scroll"><table class="wp-table">
-        <thead><tr><th>Spieler</th>${days.map(d => `<th class="${d === today ? 'today' : ''}">${WD[Dates.weekday(d) - 1]}<span>${Dates.parse(d).getDate()}.</span></th>`).join('')}</tr></thead>
-        <tbody>${players.map(p => `<tr><th>${esc(p.name)}</th>${days.map((d, i) => `<td><textarea rows="2" data-p="${p.id}" data-wd="${i + 1}" aria-label="${esc(p.name)} ${WD_LONG[i]}">${esc(val(p.id, i + 1))}</textarea></td>`).join('')}</tr>`).join('')}</tbody>
-      </table></div>
-`
+        <colgroup><col class="wp-name">${days.map(() => '<col>').join('')}</colgroup>
+        <thead><tr><th>Spieler</th>${days.map(d => `<th class="${d === today ? 'today' : ''}">${WD[Dates.weekday(d) - 1]}<span>${Dates.parse(d).getDate()}.${Dates.parse(d).getMonth() + 1}.</span></th>`).join('')}</tr></thead>
+        <tbody>${players.map(p => `<tr><th><a href="#/spieler/${p.id}">${esc(p.name)}</a></th>${days.map((d, i) => `<td>
+          <textarea rows="1" data-p="${p.id}" data-wd="${i + 1}" aria-label="${esc(p.name)} ${WD_LONG[i]}">${esc(val(p.id, i + 1))}</textarea>
+          ${fbOf(p.id, d).map(f => `<a class="wp-fb ${f.coach_seen ? '' : 'new'}" href="#/spieler/${p.id}" title="${esc(f.text || '')}">${icon('check')}<span>${f.duration_min ? `${f.duration_min} Min.` : 'Feedback'}${f.rpe != null ? ` · ${f.rpe}/10` : ''}</span></a>`).join('')}
+        </td>`).join('')}</tr>`).join('')}</tbody>
+      </table></div>`
       : '<section class="card empty"><p class="muted">Noch keine aktiven Spieler.</p></section>'}
     </div>`;
+    // Textfelder wachsen mit dem Text mit – alles bleibt lesbar
+    const grow = t => { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; };
     const st = $('#save-state', view);
     const save = async inp => {
       const row = { player_id: inp.dataset.p, week_start: ws, weekday: +inp.dataset.wd };
@@ -443,8 +459,9 @@ const Admin = {
         st.textContent = 'Gespeichert'; st.className = 'save-state ok';
       } catch (x) { st.textContent = 'Nicht gespeichert'; st.className = 'save-state bad'; toast(friendlyAuthError(x), 'err'); }
     };
-    $$('.wp-table textarea', view).forEach(inp => { inp.onchange = () => save(inp); });
+    $$('.wp-table textarea', view).forEach(t => { grow(t); t.oninput = () => grow(t); t.onchange = () => save(t); });
   },
+
 
   /* ---------- Ausgefüllte Plan-PDF eines Spielers ---------- */
   async pdfFilled(view, id, live) {

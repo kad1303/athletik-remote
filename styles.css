@@ -472,17 +472,24 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .page > .seg { justify-self: start; }
 
 /* ---------- Wochenplan (Trainer) ---------- */
+.page.wide { max-width: 1500px; }
 .week-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .week-nav strong { font-variant-numeric: tabular-nums; }
 .wp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
-.wp-table { border-collapse: collapse; width: 100%; min-width: 980px; }
-.wp-table th, .wp-table td { border-bottom: 1px solid var(--line); padding: 6px; text-align: left; }
-.wp-table thead th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; }
-.wp-table thead th span { display: block; font-size: 0.9rem; color: var(--ink); letter-spacing: 0; }
+.wp-table { border-collapse: collapse; width: 100%; min-width: 1000px; table-layout: fixed; }
+.wp-table col.wp-name { width: 170px; }
+.wp-table th, .wp-table td { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
+.wp-table th:last-child, .wp-table td:last-child { border-right: 0; }
+.wp-table thead th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; vertical-align: bottom; }
+.wp-table thead th span { display: block; font-size: 0.95rem; color: var(--ink); letter-spacing: 0; text-transform: none; }
 .wp-table thead th.today, .wp-table thead th.today span { color: var(--accent); }
-.wp-table tbody th { position: sticky; left: 0; background: var(--card); font-weight: 700; white-space: nowrap; padding-right: 12px; z-index: 1; }
+.wp-table tbody th { position: sticky; left: 0; background: var(--card); font-weight: 700; padding-top: 14px; z-index: 1; overflow-wrap: anywhere; }
+.wp-table tbody th a { color: inherit; text-decoration: none; }
 .wp-table tbody tr:last-child th, .wp-table tbody tr:last-child td { border-bottom: 0; }
-.wp-table textarea { padding: 8px 10px; font-size: 1rem; line-height: 1.3; min-width: 120px; min-height: 58px; resize: vertical; }
+.wp-table textarea { display: block; width: 100%; min-height: 44px; padding: 8px 10px; font-size: 0.95rem; line-height: 1.35; resize: none; overflow: hidden; background: var(--card-2); }
+.wp-fb { display: flex; align-items: center; gap: 4px; margin-top: 6px; padding: 4px 8px; border-radius: 8px; background: var(--done-wash); color: var(--done); font-size: 0.78rem; font-weight: 700; text-decoration: none; }
+.wp-fb .ic { width: 14px; height: 14px; stroke-width: 2.6; flex: none; }
+.wp-fb.new { outline: 2px solid var(--accent); }
 
 /* ---------- Videos von Spielern ---------- */
 .my-videos { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
@@ -519,3 +526,13 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .form .two > label { min-width: 0; }
 .sheet { overflow-x: hidden; }
 .sheet input[type=date] { min-width: 0; }
+
+/* Spielerliste: Neu von den Spielern */
+.inbox { border-color: var(--accent); }
+.inbox-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.inbox-list li + li { border-top: 1px solid var(--line); }
+.inbox-list a { display: flex; align-items: center; gap: 12px; padding: 10px 2px; color: inherit; text-decoration: none; }
+.inbox-list a > .ic:first-child { color: var(--accent); }
+.inbox-list a span { flex: 1; min-width: 0; display: block; }
+.inbox-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty-cat { padding: 12px 16px; box-shadow: none; }

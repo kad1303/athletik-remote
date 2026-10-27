@@ -255,7 +255,7 @@ const Player = {
     view.innerHTML = `<div class="page videos-page">
       <header class="page-head"><div><h1>Trainingsvideos</h1></div></header>
       <div class="videos-main">
-      ${items.length ? videoGroups(items, c => contentCard(c)) : `<section class="card empty">${icon('play', 'big')}<p class="muted">Hier ist noch nichts – Alex lädt bald Videos hoch.</p></section>`}
+      ${videoGroups(items, c => contentCard(c), true)}
       </div>
       <section class="card upload-card">
         <h2>Video an Alex schicken</h2>
@@ -318,10 +318,11 @@ const Player = {
 // Feste Rubriken der Trainingsvideos (Reihenfolge = Anzeige)
 const VIDEO_CATS = ['Würfe und Sprünge', 'Prep', 'Krafttraining', 'Auxiliary', 'Bonus'];
 // Videos nach Rubriken gruppiert anzeigen; Videos ohne Rubrik landen unter „Weitere“
-function videoGroups(items, card) {
+// showEmpty: alle fünf Rubriken zeigen, auch ohne Videos
+function videoGroups(items, card, showEmpty = false) {
   const groups = [...VIDEO_CATS, 'Weitere'].map(cat => [cat, items.filter(c => (VIDEO_CATS.includes(c.category) ? c.category : 'Weitere') === cat)]);
-  return groups.filter(([, list]) => list.length)
-    .map(([cat, list]) => `<section><h2 class="group-title">${esc(cat)}</h2><div class="content-list">${list.map(card).join('')}</div></section>`).join('');
+  return groups.filter(([cat, list]) => list.length || (showEmpty && cat !== 'Weitere'))
+    .map(([cat, list]) => `<section><h2 class="group-title">${esc(cat)}</h2>${list.length ? `<div class="content-list">${list.map(card).join('')}</div>` : '<p class="card muted small empty-cat">Noch keine Videos.</p>'}</section>`).join('');
 }
 
 // Video-Karte – auch in der Trainer-Ansicht benutzt
