@@ -8,7 +8,7 @@ const PAGE_LOGO = '<img class="page-logo" src="icons/logo-skfb.png" alt="SK Fitn
 
 const Player = {
   route(page) {
-    return { start: (v, a, live) => this.home(v, live), plan: (v, a, live) => a[0] === 'videos' ? this.planVideos(v, live) : this.plan(v, live), videos: (v, a, live) => this.videos(v, live) }[page];
+    return { start: (v, a, live) => this.home(v, live), plan: (v, a, live) => a[0] === 'videos' ? this.planVideos(v, live) : this.plan(v, a[0], live), videos: (v, a, live) => this.videos(v, live) }[page];
   },
 
   /* ---------- Start: Hallo, Woche Mo–Fr, Weg zum Plan ---------- */
@@ -16,7 +16,7 @@ const Player = {
     await this.withData(live, d => this.drawHome(view, d));
   },
 
-  drawHome(view, { plan, values: vals, week: wp = [], fb = [] }) {
+  drawHome(view, { plans = [], values: vals, week: wp = [], fb = [] }) {
     const today = Dates.today();
     // Sonntags zeigt die Startseite schon die kommende Woche, sobald Alex sie eingetragen hat
     let ws = Dates.monday(today);
@@ -29,9 +29,8 @@ const Player = {
     const active = new Set([...vals.filter(v => v.value).map(v => Dates.iso(new Date(v.updated_at))), ...fb.map(f => f.date)]);
     const fbToday = fb.find(f => f.date === today);
     const first = String(App.me.name || '').split(' ')[0];
-    const hasPlan = plan && plan.file_url;
-    // Plan schon im Hintergrund laden, damit der Reiter „Plan“ sofort da ist
-    if (hasPlan) PdfView.load(plan.file_url).catch(() => {});
+    // Pläne schon im Hintergrund laden, damit der Reiter „Plan“ sofort da ist
+    plans.forEach(pl => PdfView.load(pl.file_url).catch(() => {}));
 
     view.innerHTML = `<div class="page narrow">
       ${PAGE_LOGO}
@@ -43,18 +42,18 @@ const Player = {
           <span class="wk-t">${partOf(d) ? richText(partOf(d)) : '<span class="muted">–</span>'}</span>
           <span class="wk-c">${active.has(d) ? icon('check') : ''}</span></li>`).join('')}</ul>
       </section>
-      ${hasPlan ? `<a class="start-card" href="#/plan">
-          <span class="eyebrow">Dein Trainingsplan</span>
-          <h2>${esc(plan.title)}</h2>
-          <span class="go">Hier geht's zu deinem Trainingsplan ${icon('next')}</span>
-        </a>`
+      ${plans.length ? plans.map((pl, i) => `<a class="start-card ${i ? 'second' : ''}" href="#/plan/${pl.id}">
+          <span class="eyebrow">${i ? 'Weiterer Plan' : 'Dein Trainingsplan'}</span>
+          <h2>${esc(pl.title)}</h2>
+          <span class="go">${i ? 'Plan öffnen' : "Hier geht's zu deinem Trainingsplan"} ${icon('next')}</span>
+        </a>`).join('')
         : `<section class="card empty">${icon('file', 'big')}<h2>Dein Plan kommt gleich</h2><p class="muted">Alex lädt deinen Trainingsplan hier hoch.</p></section>`}
       <section class="card fb-card">
         <h2>Einheit geschafft?</h2>
         ${fbToday ? `<p class="fb-done">${icon('check')} Feedback für heute gesendet${fbToday.duration_min ? ` · ${fbToday.duration_min} Min.` : ''}${fbToday.rpe != null ? ` · Intensität ${fbToday.rpe}/10` : ''}</p>` : '<p class="muted small">Nach jeder Einheit kurz Feedback an Alex: Dauer, Intensität und Kommentar.</p>'}
         <button class="btn ${fbToday ? '' : 'primary'} block" id="fb-open">${fbToday ? 'Weiteres Feedback geben' : 'Feedback geben'}</button>
       </section>
-      ${hasPlan && plan.notes ? `<section class="card note"><h2>Hinweis von Alex</h2><p>${richText(plan.notes)}</p></section>` : ''}
+      ${plans.filter(pl => pl.notes).map(pl => `<section class="card note"><h2>Hinweis von Alex${plans.length > 1 ? ` · ${esc(pl.title)}` : ''}</h2><p>${richText(pl.notes)}</p></section>`).join('')}
     </div>`;
     $('#fb-open', view).onclick = () => this.feedbackSheet();
   },
@@ -124,34 +123,33 @@ const Player = {
     try { localStorage.setItem(this.snapKey(), JSON.stringify(d)); } catch {}
   },
   async fresh() {
-    let plan, fields, values;
+    let plans, values;
     // Wochenplan von Alex: diese und nächste Woche
     const mon = Dates.monday(Dates.today());
     const weekQ = DB.list('week_plans', { player_id: this.pid(), week_start: [mon, Dates.add(mon, 7)] }, { select: 'week_start,weekday,text' }).catch(() => []);
     // Eigenes Feedback seit Wochenbeginn (für Haken im Kalender)
     const fbQ = DB.list('feedback', { player_id: this.pid(), date: { gte: mon } }, { select: 'date,rpe,duration_min' }).catch(() => []);
+    // Alle aktiven Pläne (ältester zuerst = Hauptplan), jeweils mit ihren Ausfüllfeldern
     if (DEMO) {
-      [plan] = await DB.list('plans', { player_id: this.pid(), active: true }, { order: '-created_at', limit: 1 });
-      fields = plan ? await DB.list('pdf_fields', { plan_id: plan.id }) : [];
+      plans = await DB.list('plans', { player_id: this.pid(), active: true }, { order: 'created_at' });
+      for (const pl of plans) pl.fields = await DB.list('pdf_fields', { plan_id: pl.id });
       values = await DB.list('pdf_values', { player_id: this.pid() });
     } else {
-      const [plans, vals] = await Promise.all([
-        DB.list('plans', { player_id: this.pid(), active: true }, { order: '-created_at', limit: 1, select: '*,pdf_fields(id,page,kind,x,y,w,h)' }),
+      [plans, values] = await Promise.all([
+        DB.list('plans', { player_id: this.pid(), active: true }, { order: 'created_at', select: '*,pdf_fields(id,page,kind,x,y,w,h)' }),
         DB.list('pdf_values', { player_id: this.pid() }, { select: 'field_id,value,updated_at' }),
       ]);
-      plan = plans[0] || null;
-      fields = plan ? plan.pdf_fields || [] : [];
-      if (plan) delete plan.pdf_fields;
-      values = vals;
+      plans.forEach(pl => { pl.fields = pl.pdf_fields || []; delete pl.pdf_fields; });
     }
-    const ids = new Set(fields.map(f => f.id));
+    plans = plans.filter(pl => pl.file_url);
+    const ids = new Set(plans.flatMap(pl => pl.fields.map(f => f.id)));
     const week = (await weekQ).map(r => ({ week_start: r.week_start, weekday: r.weekday, text: r.text }));
     const fb = (await fbQ).map(f => ({ date: f.date, rpe: f.rpe, duration_min: f.duration_min }));
-    const d = { plan: plan || null, fields, week, fb, values: values.filter(v => ids.has(v.field_id)).map(v => ({ field_id: v.field_id, value: v.value, updated_at: v.updated_at })) };
+    const d = { plans, week, fb, values: values.filter(v => ids.has(v.field_id)).map(v => ({ field_id: v.field_id, value: v.value, updated_at: v.updated_at })) };
     this.keep(d);
     return d;
   },
-  sig(d) { return JSON.stringify([d.plan && [d.plan.id, d.plan.title, d.plan.file_url, d.plan.notes], d.fields.map(f => f.id), d.values.map(v => [v.field_id, v.value]), d.week, d.fb]); },
+  sig(d) { return JSON.stringify([(d.plans || []).map(pl => [pl.id, pl.title, pl.file_url, pl.notes, pl.fields.length]), d.values.map(v => [v.field_id, v.value]), d.week, d.fb]); },
   // Zeichnet sofort aus dem Speicher und noch einmal, falls sich online etwas geändert hat
   async withData(live, draw) {
     const old = this.cached();
@@ -163,23 +161,25 @@ const Player = {
   },
 
   // Umschalter im Reiter Plan: PDF ↔ Videos zu den Übungen im Plan
-  planTabs(on) {
-    return `<div class="seg"><a href="#/plan" class="${on === 'plan' ? 'on' : ''}">Plan</a><a href="#/plan/videos" class="${on === 'videos' ? 'on' : ''}">Videos zum Plan</a></div>`;
+  // Umschalter im Reiter Plan: jeder aktive Plan + „Videos zum Plan“
+  planTabs(on, plans = []) {
+    const tabs = plans.length > 1 ? plans.map(pl => `<a href="#/plan/${pl.id}" class="${on === pl.id ? 'on' : ''}">${esc(pl.title)}</a>`).join('') : `<a href="#/plan" class="${on !== 'videos' ? 'on' : ''}">Plan</a>`;
+    return `<div class="seg plan-seg">${tabs}<a href="#/plan/videos" class="${on === 'videos' ? 'on' : ''}">Videos zum Plan</a></div>`;
   },
 
   /* ---------- Videos zum Plan: Abgleich Übungen in der PDF ↔ Video-Datenbank ---------- */
   async planVideos(view, live) {
-    const { plan } = this.cached() || await this.fresh();
+    const { plans = [] } = this.cached() || await this.fresh();
     if (!live()) return;
-    if (!plan || !plan.file_url) { location.hash = '#/plan'; return; }
+    if (!plans.length) { location.hash = '#/plan'; return; }
     view.innerHTML = `<div class="page narrow">
-      <header class="page-head"><div><h1>${esc(plan.title)}</h1></div></header>
-      ${this.planTabs('videos')}
+      <header class="page-head"><div><h1>Videos zum Plan</h1></div></header>
+      ${this.planTabs('videos', plans)}
       <div id="pv"><div class="spinner"></div></div>
     </div>`;
     const [videos, exercises] = await Promise.all([
       this.videoList(),
-      PlanVideos.exercises(plan.file_url),
+      Promise.all(plans.map(pl => PlanVideos.exercises(pl.file_url))).then(l => [...new Set(l.flat())]),
     ]);
     if (!live()) return;
     const hits = PlanVideos.match(exercises, videos).filter(m => m.video);
@@ -193,12 +193,18 @@ const Player = {
   },
 
   /* ---------- Plan: die PDF von Alex, Kreuze und Gewichte direkt eintragen ---------- */
-  async plan(view, live) {
-    await this.withData(live, d => this.drawPlan(view, d));
+  async plan(view, id, live) {
+    await this.withData(live, d => this.drawPlan(view, d, id));
   },
 
-  drawPlan(view, { plan, fields, values: vals }) {
-    if (!plan || !plan.file_url) {
+  drawPlan(view, { plans = [], values: vals }, id) {
+    // gewählter Plan (sonst zuletzt angesehener, sonst Hauptplan)
+    let last = null;
+    try { last = sessionStorage.getItem('athletik:plan'); } catch {}
+    const plan = plans.find(pl => pl.id === id) || plans.find(pl => pl.id === last) || plans[0];
+    if (plan) try { sessionStorage.setItem('athletik:plan', plan.id); } catch {}
+    const fields = plan ? plan.fields : [];
+    if (!plan) {
       const first = String(App.me.name || '').split(' ')[0];
       view.innerHTML = `<div class="page narrow"><header class="page-head"><h1>Plan</h1></header>
         <section class="card empty">${icon('file', 'big')}<h2>Dein Plan kommt gleich</h2><p class="muted">Alex lädt deinen Trainingsplan hier hoch. Sobald er da ist, kannst du ihn direkt ausfüllen.</p></section></div>`;
@@ -210,7 +216,7 @@ const Player = {
         <span class="save-state" id="save-state"></span>
         <button class="btn small primary" id="fb-open">Feedback geben</button>
       </header>
-      ${this.planTabs('plan')}
+      ${this.planTabs(plans.length > 1 ? plan.id : 'plan', plans)}
       <div id="pdf-box" class="pdf-box"></div>
     </div>`;
     const saveState = $('#save-state');

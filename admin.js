@@ -51,10 +51,11 @@ const Admin = {
     const archived = players.filter(p => !p.active);
 
     const card = p => {
-      const plan = plans.find(x => x.player_id === p.id);
+      const pp = plans.filter(x => x.player_id === p.id);
+      const plan = pp[0];
       const last = vals.find(v => v.player_id === p.id);
       const access = p.user_id ? '' : invites.some(i => i.player_id === p.id) ? '<span class="pill warn">Einladung offen</span>' : '<span class="pill">Kein Zugang</span>';
-      const planText = !plan ? '<span class="warn-text">kein aktiver Plan</span>' : `${esc(plan.title)}${plan.file_url ? '' : ' · <span class="warn-text">noch ohne PDF</span>'}`;
+      const planText = !plan ? '<span class="warn-text">kein aktiver Plan</span>' : pp.map(x => `${esc(x.title)}${x.file_url ? '' : ' (<span class="warn-text">ohne PDF</span>)'}`).join(' · ');
       return `<a class="card player-card" href="#/spieler/${p.id}">
         <span class="avatar">${esc(initials(p.name))}</span>
         <div class="pc-main">
@@ -160,7 +161,7 @@ const Admin = {
 
   drawPlayer(view, { p, plans, invites }) {
     if (!p) { view.innerHTML = '<div class="page"><p class="err-box">Spieler nicht gefunden.</p></div>'; return; }
-    const plan = plans.find(x => x.active);
+    const actives = plans.filter(x => x.active);
 
     const access = p.user_id
       ? `<p><span class="pill ok">Hat Zugang</span></p><p class="muted small">Passwort vergessen oder neues Handy ohne Login? Zugang zurücksetzen – Einträge bleiben erhalten, ${esc(p.name.split(' ')[0])} bekommt einen neuen Link.</p>
@@ -179,11 +180,13 @@ const Admin = {
       </header>
       ${p.notes ? `<p class="card note">${richText(p.notes)}</p>` : ''}
       <section class="card">
-        <div class="card-head"><h2>Trainingsplan</h2><button class="btn small" data-act="new-plan">${icon('plus')} Neuer Plan</button></div>
-        ${plan ? `<a class="plan-box" href="#/plan/${plan.id}">
-            <div><strong>${esc(plan.title)}${plan.file_url ? ' <span class="pill">PDF</span>' : ''}</strong><span class="muted small">${plan.start_date ? `ab ${Dates.short(plan.start_date)}` : ''}${plan.weeks ? ` · ${plan.weeks} Wochen` : ''}</span></div>
-            <span class="btn small">${icon('edit')} Bearbeiten</span></a>
-          ${plan.file_url ? `<a class="btn primary block" href="#/pdf/${plan.id}">${icon('file')} Ausgefüllte PDF ansehen</a>` : '<p class="muted small">Zu diesem Plan ist noch keine PDF hochgeladen – der Spieler sieht ihn erst mit PDF.</p>'}`
+        <div class="card-head"><h2>${actives.length > 1 ? 'Trainingspläne' : 'Trainingsplan'}</h2><button class="btn small" data-act="new-plan">${icon('plus')} Neuer Plan</button></div>
+        ${actives.length ? actives.map(plan => `<div class="plan-item">
+            <a class="plan-box" href="#/plan/${plan.id}">
+              <div><strong>${esc(plan.title)}${plan.file_url ? ' <span class="pill">PDF</span>' : ''}</strong></div>
+              <span class="btn small">${icon('edit')} Bearbeiten</span></a>
+            <div class="row-btns">${plan.file_url ? `<a class="btn small" href="#/pdf/${plan.id}">${icon('file')} Ausgefüllte PDF ansehen</a>` : '<span class="muted small">Noch keine PDF – der Spieler sieht den Plan erst mit PDF.</span>'}<button class="btn small ghost" data-act="archive" data-id="${plan.id}">Zu „Frühere Pläne“</button></div>
+          </div>`).join('')
         : '<p class="muted">Noch kein aktiver Plan.</p>'}
         ${plans.filter(x => !x.active).length ? `<details class="older"><summary>Frühere Pläne (${plans.filter(x => !x.active).length})</summary>
           ${plans.filter(x => !x.active).map(x => `<div class="older-row"><a href="#/plan/${x.id}">${esc(x.title)}</a><span class="muted small">${Dates.short(x.created_at)}</span><button class="btn small" data-act="activate" data-id="${x.id}">Aktivieren</button></div>`).join('')}
@@ -218,8 +221,12 @@ const Admin = {
           await route();
           showInvite(p.name, code, `Hi ${p.name.split(' ')[0]}! Hier ist dein neuer Zugang zu Athletik Remote:`);
         }
+        if (act === 'archive') {
+          await DB.update('plans', b.dataset.id, { active: false });
+          toast('Plan liegt jetzt bei „Frühere Pläne“');
+          route();
+        }
         if (act === 'activate') {
-          for (const x of plans.filter(x => x.active)) await DB.update('plans', x.id, { active: false });
           await DB.update('plans', b.dataset.id, { active: true });
           toast('Plan ist jetzt aktiv');
           route();
@@ -259,7 +266,9 @@ const Admin = {
       <form class="form" id="npf">
         <label>Name des Plans<input name="title" placeholder="z. B. Wintervorbereitung Block 2" required></label>
         <label class="btn block upload-btn">${icon('file')} <span class="fname">Plan als PDF hochladen</span><input type="file" name="pdf" accept="application/pdf,.pdf" hidden></label>
-        <p class="muted small">Der neue Plan wird sofort aktiv, der bisherige wandert zu „Frühere Pläne“ (Einträge bleiben erhalten). Die Felder zum Ausfüllen werden automatisch gesetzt.</p>
+        <label class="check-line"><input type="checkbox" name="fill" checked> Spieler trägt etwas ein (Felder automatisch setzen)</label>
+        ${plans.some(x => x.active) ? `<label class="check-line"><input type="checkbox" name="replace"> Bisherige Pläne ersetzen (wandern zu „Frühere Pläne“)</label>` : ''}
+        <p class="muted small">Ohne Haken bei „ersetzen“ kommt der Plan zusätzlich dazu – der Spieler sieht dann alle aktiven Pläne.</p>
         <button class="btn primary block" type="submit">Plan anlegen</button>
       </form>`);
     const pdfInput = s.querySelector('input[name=pdf]');
@@ -280,9 +289,9 @@ const Admin = {
           toast('PDF wird hochgeladen …');
           over.file_url = await DB.upload(`plaene/${uuid()}-${safeName(pdfInput.files[0].name)}`, pdfInput.files[0]);
         }
-        for (const x of plans.filter(x => x.active)) await DB.update('plans', x.id, { active: false });
+        if (f.replace && f.replace.checked) for (const x of plans.filter(x => x.active)) await DB.update('plans', x.id, { active: false });
         const plan = await DB.insert('plans', { player_id: p.id, active: true, notes: '', ...over });
-        if (over.file_url) {
+        if (over.file_url && f.fill.checked) {
           toast('Felder werden erkannt …');
           const n = await this.autoFields(plan.id, over.file_url);
           toast(n ? `${plural(n, 'Feld', 'Felder')} automatisch gesetzt` : 'Plan angelegt – Felder bitte von Hand setzen');
@@ -750,9 +759,6 @@ const Admin = {
       btn.disabled = true;
       btn.textContent = 'Speichert …';
       try {
-        if (S.plan.active && plan.player_id) {
-          for (const x of await DB.list('plans', { player_id: plan.player_id, active: true })) if (x.id !== plan.id) await DB.update('plans', x.id, { active: false });
-        }
         await DB.update('plans', plan.id, {
           title: S.plan.title.trim() || 'Plan', start_date: S.plan.start_date || null, weeks: S.plan.weeks || null,
           notes: S.plan.notes || '', file_url: S.plan.file_url || null, active: !!S.plan.active, updated_at: new Date().toISOString(),
