@@ -51,10 +51,11 @@ function toast(msg, kind = '') {
 }
 
 /* ---------- Dialog (unten ausfahrend auf dem Handy) ---------- */
-function openSheet(html, { wide = false, onClose } = {}) {
+// center: kleines Fenster oben/mittig statt am unteren Rand (z. B. Gewicht eintragen – Tastatur verdeckt nichts)
+function openSheet(html, { wide = false, center = false, onClose } = {}) {
   closeSheet();
   const bg = document.createElement('div');
-  bg.className = 'sheet-bg';
+  bg.className = `sheet-bg ${center ? 'center' : ''}`;
   bg.innerHTML = `<div class="sheet ${wide ? 'wide' : ''}" role="dialog" aria-modal="true">
     <button class="icon-btn sheet-x" data-close aria-label="Schließen">${icon('x')}</button>${html}</div>`;
   document.body.appendChild(bg);
@@ -62,7 +63,8 @@ function openSheet(html, { wide = false, onClose } = {}) {
   bg._onClose = onClose;
   bg.addEventListener('click', e => { if (e.target === bg || e.target.closest('[data-close]')) closeSheet(); });
   requestAnimationFrame(() => bg.classList.add('open'));
-  const first = bg.querySelector('input:not([type=hidden]), textarea, select');
+  // Datumsfelder nicht automatisch fokussieren – sonst klappt der Kalender sofort auf
+  const first = bg.querySelector('input:not([type=hidden]):not([type=date]), textarea, select');
   if (first && matchMedia('(pointer: fine)').matches) first.focus();
   return bg.querySelector('.sheet');
 }
@@ -201,3 +203,12 @@ function debounce(fn, ms) {
   return d;
 }
 const RPE = ['', 'sehr leicht', 'leicht', 'leicht', 'mittel', 'mittel', 'fordernd', 'hart', 'sehr hart', 'extrem hart', 'Maximum'];
+
+// Kalender nach der Auswahl schließen (Safari/Chrome lassen ihn sonst offen)
+document.addEventListener('change', e => { if (e.target.matches && e.target.matches('input[type=date]')) e.target.blur(); });
+
+// Wochenplan-Eintrag: erste Zeile = was dran ist, Rest = Kommentar von Alex
+function splitPart(text) {
+  const [main, ...rest] = String(text || '').split('\n');
+  return { main: main.trim(), note: rest.join('\n').trim() };
+}

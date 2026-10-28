@@ -23,7 +23,7 @@ const Player = {
     const next = Dates.add(ws, 7);
     const showNext = Dates.weekday(today) === 7 && wp.some(r => r.week_start === next);
     if (showNext) ws = next;
-    const partOf = d => (wp.find(r => r.week_start === Dates.monday(d) && r.weekday === Dates.weekday(d)) || {}).text || '';
+    const partOf = d => splitPart((wp.find(r => r.week_start === Dates.monday(d) && r.weekday === Dates.weekday(d)) || {}).text);
     const week = Dates.week(ws);
     // Erledigt = Feedback gegeben oder etwas in den Plan eingetragen
     const active = new Set([...vals.filter(v => v.value).map(v => Dates.iso(new Date(v.updated_at))), ...fb.map(f => f.date)]);
@@ -40,8 +40,9 @@ const Player = {
         <h2>${showNext ? 'Nächste Woche' : 'Diese Woche'}</h2>
         <ul class="wk-list">${week.map(d => `<li class="${d === today ? 'today' : ''} ${active.has(d) ? 'done' : ''}">
           <span class="wk-d"><strong>${WD[Dates.weekday(d) - 1]}</strong><small>${Dates.parse(d).getDate()}.${Dates.parse(d).getMonth() + 1}.</small></span>
-          <span class="wk-t">${partOf(d) ? richText(partOf(d)) : '<span class="muted">–</span>'}</span>
-          <span class="wk-c">${active.has(d) ? icon('check') : ''}</span></li>`).join('')}</ul>
+          <span class="wk-t">${partOf(d).main ? esc(partOf(d).main) : partOf(d).note ? '' : '<span class="muted">–</span>'}${partOf(d).note ? `<button type="button" class="wk-note-btn">${icon('msg')} Kommentar</button>` : ''}</span>
+          <span class="wk-c">${active.has(d) ? icon('check') : ''}</span>
+          ${partOf(d).note ? `<p class="wk-note" hidden>${richText(partOf(d).note)}</p>` : ''}</li>`).join('')}</ul>
       </section>
       ${hasPlan ? `<a class="start-card" href="#/plan">
           <span class="eyebrow">Dein Trainingsplan</span>
@@ -56,12 +57,21 @@ const Player = {
       </section>
       ${hasPlan && plan.notes ? `<section class="card note"><h2>Hinweis von Alex</h2><p>${richText(plan.notes)}</p></section>` : ''}
     </div>`;
-    $('#fb-open', view).onclick = () => this.feedbackSheet(partOf(today));
+    $('#fb-open', view).onclick = () => this.feedbackSheet();
+    // Kommentar von Alex aufklappen
+    $$('.wk-note-btn', view).forEach(b => b.onclick = () => { const n = b.closest('li').querySelector('.wk-note'); n.hidden = !n.hidden; b.classList.toggle('on', !n.hidden); });
   },
 
   /* ---------- Feedback nach einer Einheit: Dauer, Intensität 0–10, Kommentar ---------- */
-  feedbackSheet(part = '') {
+  feedbackSheet() {
     const today = Dates.today();
+    // „Was hast du gemacht?“ aus Alex' Wochenplan für das gewählte Datum
+    const partFor = d => {
+      const s = this.cached();
+      const r = s && (s.week || []).find(x => x.week_start === Dates.monday(d) && x.weekday === Dates.weekday(d));
+      return r ? splitPart(r.text).main : '';
+    };
+    const part = partFor(today);
     let rpe = null;
     const s = openSheet(`<h2>Feedback zur Einheit</h2>
       <form class="form" id="fbf">
@@ -75,6 +85,10 @@ const Player = {
         <label>Kommentar<textarea name="text" rows="3"></textarea></label>
         <button class="btn primary block" type="submit">Feedback senden</button>
       </form>`);
+    const partInp = $('[name=part]', s);
+    let edited = false;
+    partInp.oninput = () => { edited = true; };
+    $('[name=date]', s).onchange = e => { if (!edited) partInp.value = partFor(e.target.value || today); e.target.blur(); };
     $$('[data-rpe]', s).forEach(b => b.onclick = () => {
       rpe = +b.dataset.rpe;
       $$('[data-rpe]', s).forEach(x => x.classList.toggle('on', x === b));
@@ -203,12 +217,7 @@ const Player = {
       <div id="pdf-box" class="pdf-box"></div>
     </div>`;
     const saveState = $('#save-state');
-    $('#fb-open', view).onclick = () => {
-      const s = this.cached();
-      const t = Dates.today();
-      const part = s && (s.week || []).find(r => r.week_start === Dates.monday(t) && r.weekday === Dates.weekday(t));
-      this.feedbackSheet(part ? part.text : '');
-    };
+    $('#fb-open', view).onclick = () => this.feedbackSheet();
     PdfView.mount($('#pdf-box'), plan.file_url, {
       mode: 'fill', fields, values: Object.fromEntries(vals.map(v => [v.field_id, v.value])),
       onValue: async (f, value) => {

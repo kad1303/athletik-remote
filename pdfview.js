@@ -421,7 +421,7 @@ const PdfView = {
         }
         const s = openSheet(`<h2>${f.kind === 'kg' ? 'Gewicht eintragen' : 'Eintragen'}</h2>
           <form class="form" id="pv"><div class="pv-row"><input name="v" ${f.kind === 'kg' ? 'inputmode="decimal"' : ''} value="${esc(values[f.id] || '')}" autocomplete="off">${f.kind === 'kg' ? '<span>kg</span>' : ''}</div>
-          <div class="row-btns"><button class="btn" type="button" data-clear>Leeren</button><button class="btn primary" type="submit">Übernehmen</button></div></form>`);
+          <div class="row-btns"><button class="btn" type="button" data-clear>Leeren</button><button class="btn primary" type="submit">Übernehmen</button></div></form>`, { center: true });
         const inp = s.querySelector('input');
         setTimeout(() => { inp.focus(); inp.select(); }, 50);
         const set = v => { values[f.id] = v; closeSheet(); drawFields(); opts.onValue(f, v); };
