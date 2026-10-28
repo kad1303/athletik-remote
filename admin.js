@@ -189,7 +189,7 @@ const Admin = {
           </div>`).join('')
         : '<p class="muted">Noch kein aktiver Plan.</p>'}
         ${plans.filter(x => !x.active).length ? `<details class="older"><summary>Frühere Pläne (${plans.filter(x => !x.active).length})</summary>
-          ${plans.filter(x => !x.active).map(x => `<div class="older-row"><a href="#/plan/${x.id}">${esc(x.title)}</a><span class="muted small">${Dates.short(x.created_at)}</span><button class="btn small" data-act="activate" data-id="${x.id}">Aktivieren</button></div>`).join('')}
+          ${plans.filter(x => !x.active).map(x => `<div class="older-row"><a href="#/plan/${x.id}">${esc(x.title)}</a><span class="muted small">${Dates.short(x.created_at)}</span><button class="btn small" data-act="activate" data-id="${x.id}">Aktivieren</button><button class="icon-btn sm" data-act="delete-plan" data-id="${x.id}" aria-label="Plan löschen" title="Plan löschen">${icon('trash')}</button></div>`).join('')}
         </details>` : ''}
       </section>
       <section class="card" id="access">
@@ -220,6 +220,15 @@ const Admin = {
           await DB.insert('invites', { code, role: 'player', name: p.name, player_id: p.id });
           await route();
           showInvite(p.name, code, `Hi ${p.name.split(' ')[0]}! Hier ist dein neuer Zugang zu Athletik Remote:`);
+        }
+        if (act === 'delete-plan') {
+          const pl = plans.find(x => x.id === b.dataset.id);
+          if (!pl || !(await confirmSheet(`Plan „${pl.title}“ endgültig löschen? Alles, was ${p.name.split(' ')[0]} darin eingetragen hat, ist danach weg.`))) return;
+          await DB.remove('plans', { id: pl.id });
+          // PDF aus der Ablage löschen, wenn kein anderer Plan sie noch nutzt
+          if (pl.file_url && pl.file_url.startsWith('file:') && !(await DB.list('plans', { file_url: pl.file_url }, { select: 'id' })).length) await DB.removeFile(pl.file_url.slice(5));
+          toast('Plan gelöscht');
+          route();
         }
         if (act === 'archive') {
           await DB.update('plans', b.dataset.id, { active: false });
