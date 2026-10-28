@@ -267,7 +267,7 @@ const Player = {
     view.innerHTML = `<div class="page videos-page">
       <header class="page-head"><div><h1>Trainingsvideos</h1></div></header>
       <div class="videos-main">
-      ${videoGroups(items, c => contentCard(c), true)}
+      ${videoGroups(items, c => contentCard(c), true, true)}
       </div>
       <section class="card upload-card">
         <h2>Video an Alex schicken</h2>
@@ -281,6 +281,7 @@ const Player = {
       </section>
     </div>`;
     bindContent(view);
+    bindGroups(view);
     this.bindUpload(view);
   },
 
@@ -331,7 +332,7 @@ const Player = {
 const VIDEO_CATS = ['Würfe und Sprünge', 'Prep', 'Krafttraining', 'Auxiliary', 'Bonus'];
 // Videos nach Rubriken gruppiert anzeigen; Videos ohne Rubrik landen unter „Weitere“
 // showEmpty: alle fünf Rubriken zeigen, auch ohne Videos
-// folded: Rubriken zugeklappt, Klick auf die Überschrift öffnet sie (Trainer-Ansicht).
+// folded: Rubriken zugeklappt, Klick auf die Überschrift öffnet sie.
 // Welche offen sind, merkt sich das Gerät bis zum Schließen der App.
 const OPEN_KEY = 'athletik:vopen';
 function openGroups() { try { return JSON.parse(sessionStorage.getItem(OPEN_KEY)) || []; } catch { return []; } }

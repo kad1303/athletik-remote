@@ -503,7 +503,8 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .vgroup > summary > span:first-child { flex: 1; }
 .vgroup > summary .ic { width: 20px; height: 20px; color: var(--muted); transition: transform .2s ease; }
 .vgroup[open] > summary .ic { transform: rotate(180deg); }
-.vgroup > .content-list, .vgroup > .empty-cat { padding: 0 10px 10px; }
+.vgroup > .content-list { padding: 0 10px 10px; }
+.vgroup > .empty-cat { margin: 0; padding: 0 16px 14px; background: none; border: 0; }
 .upload-card h3.group-title { margin-top: 6px; }
 
 /* Trainingsvideos (Spieler): Videos links, „Video an Alex“ rechts daneben; auf dem Handy darunter */
