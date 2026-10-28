@@ -456,11 +456,25 @@ const PdfView = {
           opts.onValue(f, values[f.id]);
           return;
         }
+        // Herangezoomt: eigenes Ziffernfeld statt Handy-Tastatur – ein Tipp ins Eingabefeld
+        // ließe das iPhone sonst wieder heraus- bzw. woandershin zoomen
+        const zoomed = window.visualViewport && visualViewport.scale > 1.02;
+        const keys = ['1', '2', '3', '⌫', '4', '5', '6', ',', '7', '8', '9', '0'];
         const s = openSheet(`<h2>${f.kind === 'kg' ? 'Gewicht eintragen' : 'Eintragen'}</h2>
-          <form class="form" id="pv"><div class="pv-row"><input name="v" ${f.kind === 'kg' ? 'inputmode="decimal"' : ''} value="${esc(values[f.id] || '')}" autocomplete="off">${f.kind === 'kg' ? '<span>kg</span>' : ''}</div>
+          <form class="form" id="pv"><div class="pv-row"><input name="v" ${zoomed ? 'readonly tabindex="-1" inputmode="none" class="pv-ro"' : f.kind === 'kg' ? 'inputmode="decimal"' : ''} value="${esc(values[f.id] || '')}" autocomplete="off">${f.kind === 'kg' ? '<span>kg</span>' : ''}</div>
+          ${zoomed ? `<div class="pv-keys">${keys.map(k => `<button type="button" class="btn" data-k="${k}">${k}</button>`).join('')}</div>` : ''}
           <div class="row-btns"><button class="btn" type="button" data-clear>Leeren</button><button class="btn primary" type="submit">Übernehmen</button></div></form>`, { center: true });
         const inp = s.querySelector('input');
-        setTimeout(() => { inp.focus(); inp.select(); }, 50);
+        if (zoomed) {
+          let fresh = true;   // erster Tipp ersetzt den alten Wert (wie markierter Text)
+          s.querySelector('.pv-keys').onclick = ev => {
+            const k = ev.target.closest('[data-k]')?.dataset.k;
+            if (!k) return;
+            if (k === '⌫') inp.value = fresh ? '' : inp.value.slice(0, -1);
+            else inp.value = (fresh ? '' : inp.value) + k;
+            fresh = false;
+          };
+        } else setTimeout(() => { inp.focus(); inp.select(); }, 50);
         const set = v => { values[f.id] = v; closeSheet(); drawFields(); opts.onValue(f, v); };
         s.querySelector('#pv').onsubmit = ev => { ev.preventDefault(); set(f.kind === 'kg' ? formatKg(inp.value) : inp.value.trim()); };
         s.querySelector('[data-clear]').onclick = () => set('');

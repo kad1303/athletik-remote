@@ -432,6 +432,9 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .pdf-page-wrap .pdf-scroll { max-height: none; }
 .pv-row { display: flex; align-items: center; gap: 10px; }
 .pv-row input { font-size: 1.6rem; font-weight: 800; text-align: center; padding: 14px; }
+.pv-ro { pointer-events: none; caret-color: transparent; }
+.pv-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; touch-action: manipulation; }
+.pv-keys .btn { min-height: 52px; font-size: 1.35rem; font-weight: 700; padding: 0; touch-action: manipulation; }
 .pv-row span { font-size: 1.2rem; font-weight: 700; color: var(--muted); }
 .pdf-field.sel { overflow: visible; z-index: 2; }
 .pdf-handle {
