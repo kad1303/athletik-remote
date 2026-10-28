@@ -807,7 +807,7 @@ const Admin = {
     view.innerHTML = `<div class="page narrow">
       <header class="page-head"><div><h1>Trainingsvideos</h1></div>
         <button class="btn primary" id="add">${icon('plus')} Video</button></header>
-      ${items.length ? videoGroups(items, c => contentCard(c, tools(c)), false, true) : '<section class="card empty"><p class="muted">Noch keine Videos hochgeladen.</p></section>'}
+      ${videoGroups(items, c => contentCard(c, tools(c)), true, true)}
     </div>`;
     bindContent(view);
     bindGroups(view);
