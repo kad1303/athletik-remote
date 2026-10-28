@@ -136,6 +136,21 @@ const Media = {
     this.links[url] = { href, t: Date.now() };
     return href;
   },
+  // Link holen. Fehlt die Datei, war die gespeicherte Video-Liste veraltet (Video wurde inzwischen
+  // neu hochgeladen): frische Liste laden, das Video mit gleichem Titel nehmen und die Ansicht danach erneuern.
+  async current(url, title, box) {
+    try { return await this.href(url); } catch (e) {
+      if (!/not.?found/i.test(e.message) || typeof DB === 'undefined') throw e;
+      const list = await DB.list('content', { section: 'videos' }, { order: 'sort,-created_at' });
+      try { localStorage.setItem('athletik:videos', JSON.stringify(list)); } catch {}
+      if (typeof dropCache === 'function') dropCache();
+      const bg = box.closest('.sheet-bg');
+      if (bg) bg._onClose = () => typeof route === 'function' && route();
+      const hit = list.find(c => c.title === title && c.url && c.url !== url);
+      if (!hit) throw new Error('Dieses Video gibt es nicht mehr – bitte die Seite neu laden.');
+      return this.href(hit.url);
+    }
+  },
   label(url) {
     return { video: 'Video ansehen', image: 'Bild ansehen', pdf: 'PDF öffnen', file: 'Datei öffnen', link: 'Link öffnen' }[this.kind(url)] || 'Öffnen';
   },
@@ -154,9 +169,9 @@ const Media = {
       const vm = String(url).match(/vimeo\.com\/(\d+)/);
       if (yt) box.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${yt}?rel=0&playsinline=1" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="${esc(title)}"></iframe>`;
       else if (vm) box.innerHTML = `<iframe src="https://player.vimeo.com/video/${vm[1]}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="${esc(title)}"></iframe>`;
-      else if (kind === 'image') box.innerHTML = `<img src="${esc(await this.href(url))}" alt="${esc(title)}">`;
+      else if (kind === 'image') box.innerHTML = `<img src="${esc(await this.current(url, title, box))}" alt="${esc(title)}">`;
       else {
-        box.innerHTML = `<video src="${esc(await this.href(url))}" controls playsinline autoplay preload="auto"></video>`;
+        box.innerHTML = `<video src="${esc(await this.current(url, title, box))}" controls playsinline autoplay preload="auto"></video>`;
         const v = box.querySelector('video');
         v.play().catch(() => {});   // startet sofort, wenn das Gerät es erlaubt
       }
