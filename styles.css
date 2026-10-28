@@ -556,3 +556,12 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .wk-note { grid-column: 1 / -1; margin: 2px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); font-size: 0.92rem; line-height: 1.4; }
 .pdf-rotate { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--accent-wash); color: var(--ink); font-size: 0.85rem; font-weight: 600; }
 .pdf-rotate .ic { width: 16px; height: 16px; transform: rotate(-90deg); color: var(--accent); }
+
+/* Wochenplan: Kommentar des Spielers zum Feedback */
+.wp-fb-wrap { display: grid; gap: 4px; }
+button.wp-fb { width: 100%; border: 0; cursor: pointer; font: inherit; font-size: 0.78rem; font-weight: 700; text-align: left; }
+button.wp-fb[disabled] { cursor: default; opacity: 1; }
+.wp-fb-c { margin-left: auto; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-style: normal; }
+.wp-fb-c .ic { width: 12px; height: 12px; stroke-width: 2.4; }
+button.wp-fb.open { background: var(--accent-wash); color: var(--ink); }
+.wp-fb-text { margin: 0; padding: 6px 8px; border-radius: 8px; background: var(--card-2); border: 1px solid var(--line); font-size: 0.82rem; line-height: 1.35; }

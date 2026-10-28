@@ -440,12 +440,8 @@ const Admin = {
         <colgroup><col class="wp-name">${days.map(() => '<col>').join('')}</colgroup>
         <thead><tr><th>Spieler</th>${days.map(d => `<th class="${d === today ? 'today' : ''}">${WD[Dates.weekday(d) - 1]}<span>${Dates.parse(d).getDate()}.${Dates.parse(d).getMonth() + 1}.</span></th>`).join('')}</tr></thead>
         <tbody>${players.map(p => `<tr><th><a href="#/spieler/${p.id}">${esc(p.name)}</a></th>${days.map((d, i) => `<td>
-          ${(() => { const { main, note } = splitPart(val(p.id, i + 1)); return `<div class="wp-cell" data-p="${p.id}" data-wd="${i + 1}">
-            <textarea rows="1" class="wp-main" placeholder="–" aria-label="${esc(p.name)} ${WD_LONG[i]}">${esc(main)}</textarea>
-            <button type="button" class="wp-note-btn ${note ? 'has' : ''}">${icon('msg')} ${note ? 'Kommentar' : '+ Kommentar'}</button>
-            <textarea rows="2" class="wp-note" placeholder="Kommentar für den Spieler" ${note ? '' : 'hidden'}>${esc(note)}</textarea>
-          </div>`; })()}
-          ${fbOf(p.id, d).map(f => `<a class="wp-fb ${f.coach_seen ? '' : 'new'}" href="#/spieler/${p.id}" title="${esc(f.text || '')}">${icon('check')}<span>${f.duration_min ? `${f.duration_min} Min.` : 'Feedback'}${f.rpe != null ? ` · ${f.rpe}/10` : ''}</span></a>`).join('')}
+          <div class="wp-cell" data-p="${p.id}" data-wd="${i + 1}"><textarea rows="1" class="wp-main" placeholder="–" aria-label="${esc(p.name)} ${WD_LONG[i]}">${esc(val(p.id, i + 1))}</textarea></div>
+          ${fbOf(p.id, d).map(f => `<div class="wp-fb-wrap"><button type="button" class="wp-fb ${f.coach_seen ? '' : 'new'}" ${f.text ? '' : 'disabled'}>${icon('check')}<span>${f.duration_min ? `${f.duration_min} Min.` : 'Feedback'}${f.rpe != null ? ` · ${f.rpe}/10` : ''}</span>${f.text ? `<i class="wp-fb-c" title="Kommentar vom Spieler">${icon('msg')}</i>` : ''}</button>${f.text ? `<p class="wp-fb-text" hidden>${richText(f.text)}</p>` : ''}</div>`).join('')}
         </td>`).join('')}</tr>`).join('')}</tbody>
       </table></div>`
       : '<section class="card empty"><p class="muted">Noch keine aktiven Spieler.</p></section>'}
@@ -453,12 +449,9 @@ const Admin = {
     // Textfelder wachsen mit dem Text mit – alles bleibt lesbar
     const grow = t => { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; };
     const st = $('#save-state', view);
-    // Gespeichert wird „Eintrag“ + Zeilenumbruch + „Kommentar“ in einem Feld
     const save = async cell => {
       const row = { player_id: cell.dataset.p, week_start: ws, weekday: +cell.dataset.wd };
-      const main = $('.wp-main', cell).value.replace(/\s*\n\s*/g, ' ').trim();
-      const note = $('.wp-note', cell).value.trim();
-      const text = main || note ? `${main}${note ? `\n${note}` : ''}` : '';
+      const text = $('.wp-main', cell).value.trim();
       st.textContent = 'Speichert …'; st.className = 'save-state';
       try {
         if (text) await DB.upsert('week_plans', { ...row, text, updated_at: new Date().toISOString() }, 'player_id,week_start,weekday');
@@ -467,15 +460,11 @@ const Admin = {
       } catch (x) { st.textContent = 'Nicht gespeichert'; st.className = 'save-state bad'; toast(friendlyAuthError(x), 'err'); }
     };
     $$('.wp-cell', view).forEach(cell => {
-      $$('textarea', cell).forEach(t => { if (!t.hidden) grow(t); t.oninput = () => grow(t); t.onchange = () => save(cell); });
-      // Enter im Eintrag springt zum Kommentar statt neue Zeile
-      $('.wp-main', cell).onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('.wp-note-btn', cell).click(); } };
-      $('.wp-note-btn', cell).onclick = () => {
-        const n = $('.wp-note', cell);
-        n.hidden = !n.hidden;
-        if (!n.hidden) { grow(n); n.focus(); }
-      };
+      const t = $('.wp-main', cell);
+      grow(t); t.oninput = () => grow(t); t.onchange = () => save(cell);
     });
+    // Kommentar des Spielers zum Feedback aufklappen
+    $$('.wp-fb:not([disabled])', view).forEach(b => b.onclick = () => { const p = b.parentElement.querySelector('.wp-fb-text'); p.hidden = !p.hidden; b.classList.toggle('open', !p.hidden); });
   },
 
 
