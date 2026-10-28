@@ -21,6 +21,9 @@ const PdfView = {
         document.head.appendChild(s);
       });
       pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js';
+      // Ein gemeinsamer Worker für alle PDFs: sonst bekommen Schriften verschiedener PDFs
+      // dieselben internen Namen und vermischen sich („Npy E“ statt „Day 1“)
+      this.worker = new pdfjsLib.PDFWorker({ name: 'athletik-pdf' });
     }
     return pdfjsLib;
   },
@@ -45,7 +48,7 @@ const PdfView = {
     if (!this.docs[url]) {
       this.docs[url] = (async () => {
         const [lib, data] = await Promise.all([this.lib(), this.bytes(url)]);
-        return lib.getDocument({ data }).promise;
+        return lib.getDocument({ data, worker: this.worker }).promise;
       })().catch(e => { delete this.docs[url]; throw e; });
     }
     return this.docs[url];
@@ -258,8 +261,10 @@ const PdfView = {
 
     const render = async () => {
       const width = Math.max(280, (scroll.clientWidth - 2) * st.zoom);
-      // Schärfe passend zum Bildschirm, aber nicht unnötig riesig (sonst wird das Zeichnen langsam)
-      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2, 2600 / width));
+      // Schärfe: am Handy doppelt so fein zeichnen, damit Heranzoomen mit zwei Fingern scharf bleibt;
+      // insgesamt begrenzt, sonst wird das Zeichnen langsam
+      const phone = window.innerWidth < 700;
+      const dpr = Math.max(1, Math.min((window.devicePixelRatio || 1) * (phone ? 2 : 1), phone ? 5 : 2, (phone ? 1800 : 2600) / width));
       pagesEl.innerHTML = '';
       st.pages = [];
       for (let n = 1; n <= doc.numPages; n++) {
