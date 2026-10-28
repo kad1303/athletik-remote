@@ -554,3 +554,5 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .wp-table textarea.wp-note { font-size: 0.85rem; min-height: 40px; background: var(--accent-wash); }
 .wk-t { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .wk-note { grid-column: 1 / -1; margin: 2px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); font-size: 0.92rem; line-height: 1.4; }
+.pdf-rotate { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--accent-wash); color: var(--ink); font-size: 0.85rem; font-weight: 600; }
+.pdf-rotate .ic { width: 16px; height: 16px; transform: rotate(-90deg); color: var(--accent); }

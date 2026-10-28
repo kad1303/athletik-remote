@@ -141,6 +141,32 @@ const PdfView = {
       return { l: x, r: x + s, t: c.t + (c.b - c.t - s) / 2, b: c.t + (c.b - c.t + s) / 2 };
     };
 
+    // Plan-Typ „Spalten zum Eintragen“ (z. B. Einh.1 | Einh.2 | SxR | Weight, unten TEMPO | RPE):
+    // Felder in die leeren Zellen unter diesen Überschriften – nur in Zeilen, in denen eine Übung (SxR) steht
+    const heads = items.filter(i => /^einh\.?\s*\d+$/i.test(i.s) || /^rpe$/i.test(i.s));
+    if (heads.length) {
+      const res = [], seen = new Set();
+      const prescribed = c => items.some(i => i.cy > c.t && i.cy < c.b && i.cx > c.r && i.cx < c.r + (c.r - c.l) * 4 && /^(\d+\s*x\s*\d+|max)/i.test(i.s));
+      for (const h of heads) {
+        const hc = cellAt(h.cx, h.cy);
+        if (!hc) continue;
+        const kind = /^rpe$/i.test(h.s) ? 'text' : 'kg';
+        const cx = (hc.l + hc.r) / 2;
+        for (let y = hc.b + 0.9, guard = 0; guard < 60; guard++) {
+          const c = cellAt(cx, y);
+          if (!c || c.r - c.l > W * 0.18) break;
+          const txt = textIn(c);
+          if (/^(einh|tempo|rpe|sxr|weight)/i.test(txt)) break;   // nächster Block beginnt
+          if (!txt && prescribed(c)) {
+            const k = `${Math.round(c.l)}|${Math.round(c.t)}`;
+            if (!seen.has(k)) { seen.add(k); res.push(rel(inset(c, 1), kind)); }
+          }
+          y = c.b + 0.9;
+        }
+      }
+      if (res.length) return res;
+    }
+
     const out = [];
     for (const it of items) {
       if (/^\d{1,2}\s*(ea|x)?$/i.test(it.s)) {
@@ -203,6 +229,7 @@ const PdfView = {
         <span class="pdf-zoom"><button class="icon-btn sm" data-zoom="-1" aria-label="Verkleinern">−</button><span class="num" id="zoom-val">100 %</span><button class="icon-btn sm" data-zoom="1" aria-label="Vergrößern">+</button></span>
       </div>
       ${editing ? '<p class="muted small pdf-hint">Feldart wählen und auf die Stelle in der PDF tippen. Feld ziehen = verschieben, roten Punkt unten rechts ziehen = Breite und Höhe ändern. Neue Felder übernehmen die zuletzt eingestellte Größe.</p>' : ''}
+      <p class="pdf-rotate" hidden>${icon('next')} Tipp: Handy quer halten – dann wird der Plan größer.</p>
       <div class="pdf-scroll"><div class="pdf-pages"></div></div>`;
     const scroll = $('.pdf-scroll', box);
     const pagesEl = $('.pdf-pages', box);
@@ -255,6 +282,9 @@ const PdfView = {
         await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
       }
       $('#zoom-val', box).textContent = `${Math.round(st.zoom * 100)} %`;
+      // Querformat-Plan auf Handy im Hochformat: Hinweis zum Drehen
+      const wideDoc = st.pages.some(p => p.ratio > 1.15);
+      $('.pdf-rotate', box).hidden = !(wideDoc && window.innerWidth < 600 && window.innerHeight > window.innerWidth);
       drawFields();
     };
     await render();
