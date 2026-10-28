@@ -497,6 +497,13 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 /* ---------- Videos von Spielern ---------- */
 .my-videos { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .my-videos li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.vgroup { margin-bottom: 10px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); }
+.vgroup > summary { display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; list-style: none; font-weight: 700; font-size: 1rem; -webkit-user-select: none; user-select: none; }
+.vgroup > summary::-webkit-details-marker { display: none; }
+.vgroup > summary > span:first-child { flex: 1; }
+.vgroup > summary .ic { width: 20px; height: 20px; color: var(--muted); transition: transform .2s ease; }
+.vgroup[open] > summary .ic { transform: rotate(180deg); }
+.vgroup > .content-list, .vgroup > .empty-cat { padding: 0 10px 10px; }
 .upload-card h3.group-title { margin-top: 6px; }
 
 /* Trainingsvideos (Spieler): Videos links, „Video an Alex“ rechts daneben; auf dem Handy darunter */

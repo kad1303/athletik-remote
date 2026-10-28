@@ -331,10 +331,26 @@ const Player = {
 const VIDEO_CATS = ['Würfe und Sprünge', 'Prep', 'Krafttraining', 'Auxiliary', 'Bonus'];
 // Videos nach Rubriken gruppiert anzeigen; Videos ohne Rubrik landen unter „Weitere“
 // showEmpty: alle fünf Rubriken zeigen, auch ohne Videos
-function videoGroups(items, card, showEmpty = false) {
+// folded: Rubriken zugeklappt, Klick auf die Überschrift öffnet sie (Trainer-Ansicht).
+// Welche offen sind, merkt sich das Gerät bis zum Schließen der App.
+const OPEN_KEY = 'athletik:vopen';
+function openGroups() { try { return JSON.parse(sessionStorage.getItem(OPEN_KEY)) || []; } catch { return []; } }
+function videoGroups(items, card, showEmpty = false, folded = false) {
   const groups = [...VIDEO_CATS, 'Weitere'].map(cat => [cat, items.filter(c => (VIDEO_CATS.includes(c.category) ? c.category : 'Weitere') === cat)]);
+  const open = openGroups();
   return groups.filter(([cat, list]) => list.length || (showEmpty && cat !== 'Weitere'))
-    .map(([cat, list]) => `<section><h2 class="group-title">${esc(cat)}</h2>${list.length ? `<div class="content-list">${list.map(card).join('')}</div>` : '<p class="card muted small empty-cat">Noch keine Videos.</p>'}</section>`).join('');
+    .map(([cat, list]) => {
+      const inner = list.length ? `<div class="content-list">${list.map(card).join('')}</div>` : '<p class="card muted small empty-cat">Noch keine Videos.</p>';
+      if (!folded) return `<section><h2 class="group-title">${esc(cat)}</h2>${inner}</section>`;
+      return `<details class="vgroup" data-cat="${esc(cat)}" ${open.includes(cat) ? 'open' : ''}>
+        <summary><span>${esc(cat)}</span><span class="pill">${list.length}</span>${icon('down')}</summary>${inner}</details>`;
+    }).join('');
+}
+function bindGroups(root) {
+  $$('details.vgroup', root).forEach(d => d.addEventListener('toggle', () => {
+    const open = $$('details.vgroup[open]', root).map(x => x.dataset.cat);
+    try { sessionStorage.setItem(OPEN_KEY, JSON.stringify(open)); } catch {}
+  }));
 }
 
 // Video-Karte – auch in der Trainer-Ansicht benutzt
