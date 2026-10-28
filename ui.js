@@ -63,11 +63,35 @@ function openSheet(html, { wide = false, center = false, onClose } = {}) {
   bg._onClose = onClose;
   bg.addEventListener('click', e => { if (e.target === bg || e.target.closest('[data-close]')) closeSheet(); });
   requestAnimationFrame(() => bg.classList.add('open'));
+  fitSheet(bg);
   // Datumsfelder nicht automatisch fokussieren – sonst klappt der Kalender sofort auf
   const first = bg.querySelector('input:not([type=hidden]):not([type=date]), textarea, select');
   if (first && matchMedia('(pointer: fine)').matches) first.focus();
   return bg.querySelector('.sheet');
 }
+// Ist die Seite mit zwei Fingern herangezoomt, liegt ein normales Fenster außerhalb des sichtbaren Bereichs.
+// Dann wird es genau in den sichtbaren Ausschnitt gelegt und passend verkleinert.
+function fitSheet(bg) {
+  const vv = window.visualViewport;
+  const apply = () => {
+    if (!bg.isConnected) { vv && vv.removeEventListener('resize', apply); vv && vv.removeEventListener('scroll', apply); return; }
+    const sheet = bg.querySelector('.sheet');
+    if (!vv || vv.scale <= 1.02) {
+      bg.removeAttribute('style'); sheet.removeAttribute('style');
+      return;
+    }
+    const s = vv.scale;
+    Object.assign(bg.style, { left: `${vv.offsetLeft}px`, top: `${vv.offsetTop}px`, width: `${vv.width}px`, height: `${vv.height}px`, right: 'auto', bottom: 'auto', padding: '0', display: 'block' });
+    Object.assign(sheet.style, {
+      position: 'absolute', left: `${12 / s}px`, top: `${(vv.height * s * 0.08) / s}px`,
+      width: `${Math.min(420, vv.width * s - 24)}px`, maxWidth: 'none', maxHeight: `${vv.height * s * 0.84}px`,
+      transform: `scale(${1 / s})`, transformOrigin: 'top left', borderRadius: '22px',
+    });
+  };
+  apply();
+  if (vv) { vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); }
+}
+
 function closeSheet() {
   const bg = $('.sheet-bg');
   if (!bg) return;

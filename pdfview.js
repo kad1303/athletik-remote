@@ -48,7 +48,9 @@ const PdfView = {
     if (!this.docs[url]) {
       this.docs[url] = (async () => {
         const [lib, data] = await Promise.all([this.lib(), this.bytes(url)]);
-        return lib.getDocument({ data, worker: this.worker }).promise;
+        // disableFontFace: Schriften zeichnet pdf.js selbst – kein Durcheinander mit Schriften
+        // des Geräts oder anderer PDFs (auf dem iPhone sonst „Npy E“ statt „Day 1“)
+        return lib.getDocument({ data, worker: this.worker, disableFontFace: true }).promise;
       })().catch(e => { delete this.docs[url]; throw e; });
     }
     return this.docs[url];
