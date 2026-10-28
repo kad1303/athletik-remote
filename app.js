@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '32';
+const APP_VERSION = '33';
 
 // Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
 const DEMO_PARAM = new URLSearchParams(location.search).get('demo');
@@ -109,7 +109,9 @@ async function boot() {
 }
 
 function renderFrame(inner) {
-  $('#app').innerHTML = `<main class="auth-wrap"><div class="auth-card">
+  $('#app').innerHTML = `<main class="auth-wrap">
+    <div class="bg-lines" aria-hidden="true"><img src="icons/lines-a.svg" class="bl-a" alt=""><img src="icons/lines-b.svg" class="bl-b" alt=""></div>
+    <div class="auth-card">
     <div class="brand-big"><img class="brand-logo" src="icons/logo-skfb.png" alt="SK Fitness Base"><span>Athletiktraining Remote</span></div>
     ${inner}</div></main>`;
 }

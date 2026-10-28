@@ -2,10 +2,10 @@
 // Neu geladen wird nur, wenn es eine neue Version gibt: app.js vergleicht version.json,
 // leert dann diesen Speicher und lädt neu – dann holt der Service Worker alles frisch.
 // Trainingsdaten werden NICHT gespeichert – Anfragen an Supabase laufen am Service Worker vorbei.
-const CACHE = 'athletik-v33';
+const CACHE = 'athletik-v34';
 const ASSETS = [
   './', './index.html', './styles.css', './config.js', './auth.js', './demo.js', './ui.js', './player.js', './pdfview.js', './admin.js', './app.js',
-  './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/logo-skfb.png',
+  './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/logo-skfb.png', './icons/lines-a.svg', './icons/lines-b.svg',
 ];
 const NETWORK_TIMEOUT_MS = 8000;
 
