@@ -32,8 +32,7 @@ const Player = {
     // Pläne schon im Hintergrund laden, damit der Reiter „Plan“ sofort da ist
     plans.forEach(pl => PdfView.load(pl.file_url).catch(() => {}));
 
-    view.innerHTML = `<div class="page narrow home-page">
-      <img src="icons/lines-a.svg" class="home-lines" alt="" aria-hidden="true">
+    view.innerHTML = `<div class="page narrow">
       ${PAGE_LOGO}
       <header class="page-head"><div><h1>Hallo ${esc(first)}</h1><p class="muted">${Dates.long(today)}</p></div></header>
       <section class="card">
