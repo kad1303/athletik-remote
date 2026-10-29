@@ -62,12 +62,19 @@ const Player = {
   feedbackSheet() {
     const today = Dates.today();
     // „Was hast du gemacht?“ aus Alex' Wochenplan für das gewählte Datum
-    const partFor = d => {
+    // Erst aus dem Gerätespeicher (diese + nächste Woche), sonst direkt aus der Datenbank
+    const first = r => (r ? r.text.split('\n')[0].trim() : '');
+    const partLocal = d => {
       const s = this.cached();
-      const r = s && (s.week || []).find(x => x.week_start === Dates.monday(d) && x.weekday === Dates.weekday(d));
-      return r ? r.text.split('\n')[0].trim() : '';
+      return s && (s.week || []).find(x => x.week_start === Dates.monday(d) && x.weekday === Dates.weekday(d));
     };
-    const part = partFor(today);
+    const partFor = async d => {
+      const hit = partLocal(d);
+      if (hit) return first(hit);
+      const rows = await DB.list('week_plans', { player_id: this.pid(), week_start: Dates.monday(d), weekday: Dates.weekday(d) }, { select: 'text' }).catch(() => []);
+      return first(rows[0]);
+    };
+    const part = first(partLocal(today));
     let rpe = null;
     const s = openSheet(`<h2>Feedback zur Einheit</h2>
       <form class="form" id="fbf">
@@ -75,16 +82,29 @@ const Player = {
           <label>Datum<input type="date" name="date" value="${today}" max="${today}" required></label>
           <label>Dauer (Minuten)<input type="number" name="dur" inputmode="numeric" min="1" max="600" placeholder="z. B. 60" required></label>
         </div>
-        <label>Was hast du gemacht?<input name="part" value="${esc(part)}" placeholder="z. B. Day 1"></label>
+        <label>Was hast du gemacht?<input name="part" value="${esc(part)}" placeholder="${part ? '' : 'Laut Wochenplan nichts – bitte eintragen'}"></label>
         <div class="rpe-label"><span>Intensität</span><strong id="rpe-text">bitte wählen</strong></div>
         <div class="rpe rpe11">${Array.from({ length: 11 }, (_, i) => `<button type="button" data-rpe="${i}" style="--h:${i}">${i}</button>`).join('')}</div>
-        <label>Kommentar<textarea name="text" rows="3"></textarea></label>
+        <label>Kommentar (freiwillig)<textarea name="text" rows="3"></textarea></label>
         <button class="btn primary block" type="submit">Feedback senden</button>
       </form>`);
     const partInp = $('[name=part]', s);
     let edited = false;
     partInp.oninput = () => { edited = true; };
-    $('[name=date]', s).onchange = e => { if (!edited) partInp.value = partFor(e.target.value || today); e.target.blur(); };
+    // Datum gewählt → Teil aus Alex' Wochenplan für diesen Tag eintragen (solange nicht selbst geändert)
+    let asked = '';
+    const fill = async d => {
+      if (edited || !d || d === asked) return;
+      asked = d;
+      const v = await partFor(d);
+      if (edited || asked !== d) return;
+      partInp.value = v;
+      partInp.placeholder = v ? '' : 'Laut Wochenplan nichts – bitte eintragen';
+    };
+    const dateInp = $('[name=date]', s);
+    dateInp.addEventListener('input', () => fill(dateInp.value));
+    dateInp.addEventListener('change', () => { fill(dateInp.value); dateInp.blur(); });
+    if (!part) { asked = ''; fill(today); }   // heute nicht im Gerätespeicher → nachschauen
     $$('[data-rpe]', s).forEach(b => b.onclick = () => {
       rpe = +b.dataset.rpe;
       $$('[data-rpe]', s).forEach(x => x.classList.toggle('on', x === b));
