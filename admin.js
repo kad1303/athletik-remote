@@ -683,7 +683,7 @@ const Admin = {
           await PdfView.mount($('#pdf-ed', s), S.plan.file_url, {
             mode: 'fields', fields,
             onAdd: f => run(() => DB.insert('pdf_fields', { id: f.id, plan_id: id, page: f.page, kind: f.kind, x: f.x, y: f.y, w: f.w, h: f.h })),
-            onChange: f => run(() => DB.update('pdf_fields', f.id, { x: f.x, y: f.y, w: f.w, h: f.h })),
+            onChange: f => run(() => DB.update('pdf_fields', f.id, { kind: f.kind, x: f.x, y: f.y, w: f.w, h: f.h })),
             onDelete: f => run(() => DB.remove('pdf_fields', { id: f.id })),
           });
         } catch (x) { $('#pdf-ed', s).innerHTML = `<p class="err-box">${esc(friendlyAuthError(x))}</p>`; }

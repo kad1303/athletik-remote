@@ -233,7 +233,7 @@ const PdfView = {
           <button class="btn small" data-import hidden></button>` : ''}
         <span class="pdf-zoom"><button class="icon-btn sm" data-zoom="-1" aria-label="Verkleinern">−</button><span class="num" id="zoom-val">100 %</span><button class="icon-btn sm" data-zoom="1" aria-label="Vergrößern">+</button></span>
       </div>
-      ${editing ? '<p class="muted small pdf-hint">Feldart wählen und auf die Stelle in der PDF tippen. Feld ziehen = verschieben, roten Punkt unten rechts ziehen = Breite und Höhe ändern. Neue Felder übernehmen die zuletzt eingestellte Größe.</p>' : ''}
+      ${editing ? '<p class="muted small pdf-hint">Feldart wählen und auf die Stelle in der PDF tippen. Feld antippen und andere Feldart wählen = Feldart ändern. Feld ziehen = verschieben, roten Punkt unten rechts ziehen = Breite und Höhe ändern. Neue Felder übernehmen die zuletzt eingestellte Größe.</p>' : ''}
       <p class="pdf-rotate" hidden>${icon('next')} Tipp: Handy quer halten – dann wird der Plan größer.</p>
       <div class="pdf-scroll"><div class="pdf-pages"></div></div>`;
     const scroll = $('.pdf-scroll', box);
@@ -259,6 +259,10 @@ const PdfView = {
       });
       const sel = $('.pdf-sel', box);
       if (sel) sel.hidden = !st.selected;
+      // Ausgewähltes Feld: oben seine Feldart anzeigen
+      const cur = st.selected && fields.find(x => x.id === st.selected);
+      if (cur) st.tool = cur.kind;
+      $$('[data-tool]', box).forEach(b => b.classList.toggle('on', b.dataset.tool === st.tool));
     };
 
     const render = async () => {
@@ -341,7 +345,14 @@ const PdfView = {
         return;
       }
       const t = e.target.closest('[data-tool]');
-      if (t) { st.tool = t.dataset.tool; $$('[data-tool]', box).forEach(b => b.classList.toggle('on', b === t)); return; }
+      if (t) {
+        st.tool = t.dataset.tool;
+        // Ist ein Feld ausgewählt, bekommt es die neue Feldart (z. B. kg → Kreuz)
+        const f = st.selected && fields.find(x => x.id === st.selected);
+        if (f && f.kind !== st.tool) { f.kind = st.tool; opts.onChange(f); }
+        drawFields();
+        return;
+      }
       const s = e.target.closest('[data-sel]');
       if (s && st.selected) {
         const f = fields.find(x => x.id === st.selected);
