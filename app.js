@@ -6,7 +6,7 @@
    ============================================================ */
 
 // Bei jeder Änderung hochzählen – und gleich in version.json eintragen.
-const APP_VERSION = '44';
+const APP_VERSION = '45';
 
 // Vorschau mit Beispieldaten: ohne Datenbank automatisch, sonst über ?demo (bzw. ?demo=spieler / ?demo=trainer)
 const DEMO_PARAM = new URLSearchParams(location.search).get('demo');

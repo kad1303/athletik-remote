@@ -130,9 +130,22 @@ const Admin = {
     anchor.insertAdjacentHTML('beforebegin', `<section class="card" id="pfb"><h2>Feedback zu Einheiten</h2>
       ${list.length ? `<ul class="fb-list">${list.map(f => `<li class="${f.coach_seen ? '' : 'new'}">
         <div class="fb-meta"><strong>${Dates.short(f.date)}</strong>${f.day_title ? `<span class="muted small">${esc(f.day_title)}</span>` : ''}
-          ${f.duration_min ? `<span class="pill">${f.duration_min} Min.</span>` : ''}${f.rpe != null ? `<span class="pill ${hot(f.rpe)}">Intensität ${f.rpe}/10</span>` : ''}${f.coach_seen ? '' : '<span class="pill accent">neu</span>'}</div>
+          ${f.duration_min ? `<span class="pill">${f.duration_min} Min.</span>` : ''}${f.rpe != null ? `<span class="pill ${hot(f.rpe)}">Intensität ${f.rpe}/10</span>` : ''}${f.coach_seen ? '' : '<span class="pill accent">neu</span>'}
+          <button class="icon-btn sm del-btn" data-del-fb="${f.id}" aria-label="Feedback löschen">${icon('trash')}</button></div>
         ${f.text ? `<p>${richText(f.text)}</p>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Noch kein Feedback.</p>'}
     </section>`);
+    $$('[data-del-fb]', view).forEach(b => b.onclick = async () => {
+      const f = list.find(x => x.id === b.dataset.delFb);
+      if (!(await confirmSheet(`Feedback vom ${Dates.short(f.date)} löschen?`))) return;
+      try {
+        await DB.remove('feedback', { id: f.id });
+        list.splice(list.indexOf(f), 1);
+        b.closest('li').remove();
+        if (!list.length) $('#pfb .fb-list', view)?.insertAdjacentHTML('afterend', '<p class="muted">Noch kein Feedback.</p>');
+        if (!list.length) $('#pfb .fb-list', view)?.remove();
+        toast('Gelöscht');
+      } catch (x) { toast(friendlyAuthError(x), 'err'); }
+    });
     const unseen = list.filter(f => !f.coach_seen);
     if (unseen.length) Promise.all(unseen.map(f => DB.update('feedback', f.id, { coach_seen: true }))).catch(() => {});
   },
@@ -146,7 +159,19 @@ const Admin = {
     anchor.insertAdjacentHTML('beforebegin', `<section class="card" id="pvids"><h2>Videos vom Spieler</h2>
       <ul class="my-videos">${list.map(v => `<li class="${v.coach_seen ? '' : 'new'}">
         <button class="chip-btn" data-pv="${v.id}" data-video="${esc(v.url)}" data-title="${esc(v.title || 'Video')}">${icon('play')} ${esc(v.title || 'Video')}</button>
-        <span class="muted small">${Dates.short(v.created_at)}</span>${v.coach_seen ? '' : '<span class="pill accent">neu</span>'}</li>`).join('')}</ul></section>`);
+        <span class="muted small">${Dates.short(v.created_at)}</span>${v.coach_seen ? '' : '<span class="pill accent">neu</span>'}
+        <button class="icon-btn sm del-btn" data-del-pv="${v.id}" aria-label="Video löschen">${icon('trash')}</button></li>`).join('')}</ul></section>`);
+    $$('[data-del-pv]', view).forEach(b => b.onclick = async () => {
+      const v = list.find(x => x.id === b.dataset.delPv);
+      if (!(await confirmSheet(`Video „${v.title || 'Video'}“ löschen?`))) return;
+      try {
+        await DB.remove('player_videos', { id: v.id });
+        if (v.url && v.url.startsWith('file:')) await DB.removeFile(v.url.slice(5));
+        list.splice(list.indexOf(v), 1);
+        if (list.length) b.closest('li').remove(); else $('#pvids', view)?.remove();
+        toast('Gelöscht');
+      } catch (x) { toast(friendlyAuthError(x), 'err'); }
+    });
     $$('#pvids [data-video]', view).forEach(b => b.onclick = async () => {
       Media.open(b.dataset.video, b.dataset.title);
       const v = list.find(x => x.id === b.dataset.pv);
