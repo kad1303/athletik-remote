@@ -504,6 +504,9 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .vgroup > summary > span:first-child { flex: 1; }
 .vgroup > summary .ic { width: 20px; height: 20px; color: var(--muted); transition: transform .2s ease; }
 .vgroup[open] > summary .ic { transform: rotate(180deg); }
+.pgroup > .pg-body { padding: 0 16px 16px; }
+.pgroup .pg-top { margin-bottom: 10px; }
+.pgroup > summary .pill { flex: none; }
 .vgroup > .content-list { padding: 0 10px 10px; }
 .vgroup > .empty-cat { margin: 0; padding: 0 16px 14px; background: none; border: 0; }
 .upload-card h3.group-title { margin-top: 6px; }

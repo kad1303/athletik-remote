@@ -127,13 +127,13 @@ const Admin = {
     if (!anchor || !anchor.isConnected) return;
     $('#pfb', view)?.remove();
     const hot = r => r >= 9 ? 'hot' : r >= 7 ? 'warm' : '';
-    anchor.insertAdjacentHTML('beforebegin', `<section class="card" id="pfb"><h2>Feedback zu Einheiten</h2>
+    const newCount = list.filter(f => !f.coach_seen).length;
+    anchor.insertAdjacentHTML('beforebegin', fold('fb', 'Feedback zu Einheiten', `<span class="pill cnt">${list.length}</span>${newCount ? `<span class="pill accent">${newCount} neu</span>` : ''}`, `
       ${list.length ? `<ul class="fb-list">${list.map(f => `<li class="${f.coach_seen ? '' : 'new'}">
         <div class="fb-meta"><strong>${Dates.short(f.date)}</strong>${f.day_title ? `<span class="muted small">${esc(f.day_title)}</span>` : ''}
           ${f.duration_min ? `<span class="pill">${f.duration_min} Min.</span>` : ''}${f.rpe != null ? `<span class="pill ${hot(f.rpe)}">Intensität ${f.rpe}/10</span>` : ''}${f.coach_seen ? '' : '<span class="pill accent">neu</span>'}
           <button class="icon-btn sm del-btn" data-del-fb="${f.id}" aria-label="Feedback löschen">${icon('trash')}</button></div>
-        ${f.text ? `<p>${richText(f.text)}</p>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Noch kein Feedback.</p>'}
-    </section>`);
+        ${f.text ? `<p>${richText(f.text)}</p>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Noch kein Feedback.</p>'}`, 'pfb'));
     $$('[data-del-fb]', view).forEach(b => b.onclick = async () => {
       const f = list.find(x => x.id === b.dataset.delFb);
       if (!(await confirmSheet(`Feedback vom ${Dates.short(f.date)} löschen?`))) return;
@@ -141,13 +141,18 @@ const Admin = {
         await DB.remove('feedback', { id: f.id });
         list.splice(list.indexOf(f), 1);
         b.closest('li').remove();
+        $('#pfb .cnt', view).textContent = list.length;
         if (!list.length) $('#pfb .fb-list', view)?.insertAdjacentHTML('afterend', '<p class="muted">Noch kein Feedback.</p>');
         if (!list.length) $('#pfb .fb-list', view)?.remove();
         toast('Gelöscht');
       } catch (x) { toast(friendlyAuthError(x), 'err'); }
     });
-    const unseen = list.filter(f => !f.coach_seen);
-    if (unseen.length) Promise.all(unseen.map(f => DB.update('feedback', f.id, { coach_seen: true }))).catch(() => {});
+    // Als gelesen markieren, sobald Alex den Bereich aufklappt
+    bindFold($('#pfb', view), () => {
+      const unseen = list.filter(f => !f.coach_seen);
+      unseen.forEach(f => { f.coach_seen = true; });
+      if (unseen.length) Promise.all(unseen.map(f => DB.update('feedback', f.id, { coach_seen: true }))).catch(() => {});
+    });
   },
 
   // Videos, die der Spieler an Alex geschickt hat (neu = noch nicht angesehen)
@@ -156,11 +161,13 @@ const Admin = {
     const anchor = $('#access', view);
     if (!anchor || !anchor.isConnected || !list.length) return;
     $('#pvids', view)?.remove();
-    anchor.insertAdjacentHTML('beforebegin', `<section class="card" id="pvids"><h2>Videos vom Spieler</h2>
+    const newVids = list.filter(v => !v.coach_seen).length;
+    anchor.insertAdjacentHTML('beforebegin', fold('vids', 'Videos vom Spieler', `<span class="pill cnt">${list.length}</span>${newVids ? `<span class="pill accent">${newVids} neu</span>` : ''}`, `
       <ul class="my-videos">${list.map(v => `<li class="${v.coach_seen ? '' : 'new'}">
         <button class="chip-btn" data-pv="${v.id}" data-video="${esc(v.url)}" data-title="${esc(v.title || 'Video')}">${icon('play')} ${esc(v.title || 'Video')}</button>
         <span class="muted small">${Dates.short(v.created_at)}</span>${v.coach_seen ? '' : '<span class="pill accent">neu</span>'}
-        <button class="icon-btn sm del-btn" data-del-pv="${v.id}" aria-label="Video löschen">${icon('trash')}</button></li>`).join('')}</ul></section>`);
+        <button class="icon-btn sm del-btn" data-del-pv="${v.id}" aria-label="Video löschen">${icon('trash')}</button></li>`).join('')}</ul>`, 'pvids'));
+    bindFold($('#pvids', view));
     $$('[data-del-pv]', view).forEach(b => b.onclick = async () => {
       const v = list.find(x => x.id === b.dataset.delPv);
       if (!(await confirmSheet(`Video „${v.title || 'Video'}“ löschen?`))) return;
@@ -168,7 +175,7 @@ const Admin = {
         await DB.remove('player_videos', { id: v.id });
         if (v.url && v.url.startsWith('file:')) await DB.removeFile(v.url.slice(5));
         list.splice(list.indexOf(v), 1);
-        if (list.length) b.closest('li').remove(); else $('#pvids', view)?.remove();
+        if (list.length) { b.closest('li').remove(); $('#pvids .cnt', view).textContent = list.length; } else $('#pvids', view)?.remove();
         toast('Gelöscht');
       } catch (x) { toast(friendlyAuthError(x), 'err'); }
     });
@@ -204,8 +211,8 @@ const Admin = {
         <button class="icon-btn" data-act="edit" aria-label="Spieler bearbeiten">${icon('edit')}</button>
       </header>
       ${p.notes ? `<p class="card note">${richText(p.notes)}</p>` : ''}
-      <section class="card">
-        <div class="card-head"><h2>${actives.length > 1 ? 'Trainingspläne' : 'Trainingsplan'}</h2><button class="btn small" data-act="new-plan">${icon('plus')} Neuer Plan</button></div>
+      ${fold('plans', 'Trainingspläne', `<span class="pill">${actives.length} aktiv</span>`, `
+        <div class="row-btns pg-top"><button class="btn small" data-act="new-plan">${icon('plus')} Neuer Plan</button></div>
         ${actives.length ? actives.map(plan => `<div class="plan-item">
             <a class="plan-box" href="#/plan/${plan.id}">
               <div><strong>${esc(plan.title)}${plan.file_url ? ' <span class="pill">PDF</span>' : ''}</strong></div>
@@ -215,14 +222,14 @@ const Admin = {
         : '<p class="muted">Noch kein aktiver Plan.</p>'}
         ${plans.filter(x => !x.active).length ? `<details class="older"><summary>Frühere Pläne (${plans.filter(x => !x.active).length})</summary>
           ${plans.filter(x => !x.active).map(x => `<div class="older-row"><a href="#/plan/${x.id}">${esc(x.title)}</a><span class="muted small">${Dates.short(x.created_at)}</span><button class="btn small" data-act="activate" data-id="${x.id}">Aktivieren</button><button class="icon-btn sm" data-act="delete-plan" data-id="${x.id}" aria-label="Plan löschen" title="Plan löschen">${icon('trash')}</button></div>`).join('')}
-        </details>` : ''}
-      </section>
+        </details>` : ''}`, 'pplans')}
       <section class="card" id="access">
         <div class="card-head"><h2>Zugang</h2></div>
         ${access}
       </section>
     </div>`;
 
+    bindFold($('#pplans', view));
     view.onclick = async e => {
       const b = e.target.closest('[data-act]');
       if (!b) return;
@@ -901,6 +908,24 @@ function checkPdf(file) {
   if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { toast('Bitte eine PDF-Datei wählen.', 'err'); return false; }
   if (file.size > MAX_UPLOAD_MB * 1048576) { toast(`Die PDF ist größer als ${MAX_UPLOAD_MB} MB.`, 'err'); return false; }
   return true;
+}
+
+// Aufklappbare Bereiche im Spieler-Detail (zu Beginn zu, offene merkt sich das Gerät bis zum Schließen der App)
+const FOLD_KEY = 'athletik:popen';
+function foldOpen() { try { return JSON.parse(sessionStorage.getItem(FOLD_KEY)) || []; } catch { return []; } }
+function fold(key, title, pills, body, id) {
+  return `<details class="vgroup pgroup" id="${id}" data-sec="${key}" ${foldOpen().includes(key) ? 'open' : ''}>
+    <summary><span>${esc(title)}</span>${pills}${icon('down')}</summary><div class="pg-body">${body}</div></details>`;
+}
+function bindFold(el, onOpen) {
+  if (!el) return;
+  el.addEventListener('toggle', () => {
+    const open = new Set(foldOpen());
+    if (el.open) open.add(el.dataset.sec); else open.delete(el.dataset.sec);
+    try { sessionStorage.setItem(FOLD_KEY, JSON.stringify([...open])); } catch {}
+    if (el.open && onOpen) onOpen();
+  });
+  if (el.open && onOpen) onOpen();
 }
 
 function safeName(name) {
