@@ -35,13 +35,7 @@ const Player = {
     view.innerHTML = `<div class="page narrow">
       ${PAGE_LOGO}
       <header class="page-head"><div><h1>Hallo ${esc(first)}</h1><p class="muted">${Dates.long(today)}</p></div></header>
-      <section class="card">
-        <h2>${showNext ? 'Nächste Woche' : 'Diese Woche'}</h2>
-        <ul class="wk-list">${week.map(d => `<li class="${d === today ? 'today' : ''} ${active.has(d) ? 'done' : ''}">
-          <span class="wk-d"><strong>${WD[Dates.weekday(d) - 1]}</strong><small>${Dates.parse(d).getDate()}.${Dates.parse(d).getMonth() + 1}.</small></span>
-          <span class="wk-t">${partOf(d) ? richText(partOf(d)) : '<span class="muted">–</span>'}</span>
-          <span class="wk-c">${active.has(d) ? icon('check') : ''}</span></li>`).join('')}</ul>
-      </section>
+      <section class="card" id="wk-card">${this.weekHtml(week, partOf, active, today, showNext ? 'Nächste Woche' : 'Diese Woche')}</section>
       ${plans.length ? plans.map((pl, i) => `<a class="start-card ${i ? 'second' : ''}" href="#/plan/${pl.id}">
           <span class="eyebrow">${i ? 'Weiterer Plan' : 'Dein Trainingsplan'}</span>
           <h2>${esc(pl.title)}</h2>
@@ -56,6 +50,53 @@ const Player = {
       ${plans.filter(pl => pl.notes).map(pl => `<section class="card note"><h2>Hinweis von Alex${plans.length > 1 ? ` · ${esc(pl.title)}` : ''}</h2><p>${richText(pl.notes)}</p></section>`).join('')}
     </div>`;
     $('#fb-open', view).onclick = () => this.feedbackSheet();
+
+    // Wochen blättern: zurück beliebig weit, vor bis zur übernächsten Woche
+    const card = $('#wk-card', view);
+    const now = Dates.monday(today), last = Dates.add(now, 14);
+    const known = new Set([now, Dates.add(now, 7)]);   // diese Wochen stecken schon im Gerätespeicher
+    const show = async shown => {
+      this.wkShown = shown;
+      const n = Dates.diffDays(now, shown) / 7;
+      const title = { '-1': 'Letzte Woche', 0: 'Diese Woche', 1: 'Nächste Woche', 2: 'Übernächste Woche' }[n] || `KW ${Dates.kw(shown)}`;
+      const draw = (rows, fbDates) => {
+        if (!card.isConnected || this.wkShown !== shown) return;
+        const pOf = d => (rows.find(r => r.week_start === shown && r.weekday === Dates.weekday(d)) || {}).text || '';
+        card.innerHTML = this.weekHtml(Dates.week(shown), pOf, new Set([...active, ...fbDates]), today, title, shown < last);
+      };
+      if (known.has(shown)) return draw(wp, []);
+      const c = this.wkCache[shown];
+      if (c) draw(c.rows, c.fb);
+      else draw([], []);
+      const [rows, fbs] = await Promise.all([
+        DB.list('week_plans', { player_id: this.pid(), week_start: shown }, { select: 'week_start,weekday,text' }).catch(() => []),
+        DB.list('feedback', { player_id: this.pid(), date: { gte: shown, lte: Dates.add(shown, 6) } }, { select: 'date' }).catch(() => []),
+      ]);
+      this.wkCache[shown] = { rows, fb: fbs.map(f => f.date) };
+      draw(rows, this.wkCache[shown].fb);
+    };
+    card.onclick = e => {
+      const b = e.target.closest('[data-wk]');
+      if (b && !b.disabled) show(Dates.add(this.wkShown || ws, 7 * +b.dataset.wk));
+    };
+    // Beim Zurückkehren auf die Startseite bleibt die zuletzt angesehene Woche stehen
+    if (this.wkShown && this.wkShown !== ws) show(this.wkShown);
+    else this.wkShown = ws;
+  },
+  wkCache: {},
+
+  // Wochenliste Mo–So mit Alex' Eintrag je Tag und Häkchen für Tage mit Feedback/Einträgen
+  weekHtml(week, partOf, active, today, title, canFwd = true) {
+    const f = s => `${Dates.parse(s).getDate()}.${Dates.parse(s).getMonth() + 1}.`;
+    return `<div class="wk-nav">
+        <button class="icon-btn sm" data-wk="-1" aria-label="Woche davor">${icon('back')}</button>
+        <div><h2>${esc(title)}</h2><span class="muted small">${f(week[0])} – ${f(week[6])}</span></div>
+        <button class="icon-btn sm" data-wk="1" aria-label="Woche danach" ${canFwd ? '' : 'disabled'}>${icon('next')}</button>
+      </div>
+      <ul class="wk-list">${week.map(d => `<li class="${d === today ? 'today' : ''} ${active.has(d) ? 'done' : ''}">
+        <span class="wk-d"><strong>${WD[Dates.weekday(d) - 1]}</strong><small>${f(d)}</small></span>
+        <span class="wk-t">${partOf(d) ? richText(partOf(d)) : '<span class="muted">–</span>'}</span>
+        <span class="wk-c">${active.has(d) ? icon('check') : ''}</span></li>`).join('')}</ul>`;
   },
 
   /* ---------- Feedback nach einer Einheit: Dauer, Intensität 0–10, Kommentar ---------- */
