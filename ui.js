@@ -71,12 +71,14 @@ function openSheet(html, { wide = false, center = false, onClose } = {}) {
 }
 // Ist die Seite mit zwei Fingern herangezoomt, liegt ein normales Fenster außerhalb des sichtbaren Bereichs.
 // Dann wird es genau in den sichtbaren Ausschnitt gelegt und passend verkleinert.
+// Nur für Fenster, die schon im Zoom geöffnet werden – zoomt man erst danach (z. B. im Feld-Editor), bleibt alles normal.
 function fitSheet(bg) {
   const vv = window.visualViewport;
+  if (!vv || vv.scale <= 1.02) return;
   const apply = () => {
-    if (!bg.isConnected) { vv && vv.removeEventListener('resize', apply); vv && vv.removeEventListener('scroll', apply); return; }
+    if (!bg.isConnected) { vv.removeEventListener('resize', apply); vv.removeEventListener('scroll', apply); return; }
     const sheet = bg.querySelector('.sheet');
-    if (!vv || vv.scale <= 1.02) {
+    if (vv.scale <= 1.02 || sheet.classList.contains('full')) {
       bg.removeAttribute('style'); sheet.removeAttribute('style');
       return;
     }
@@ -89,7 +91,7 @@ function fitSheet(bg) {
     });
   };
   apply();
-  if (vv) { vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); }
+  vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply);
 }
 
 function closeSheet() {
