@@ -182,11 +182,27 @@ const Remote = {
     return t ? JSON.parse(t) : null;
   },
 
-  async upload(path, file) {
-    await Auth.fetch(`/storage/v1/object/media/${path.split('/').map(encodeURIComponent).join('/')}`, {
-      method: 'POST',
-      headers: { 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'false' },
-      body: file,
+  // onProgress(0…1): mit Fortschritt (über XMLHttpRequest, fetch kennt keinen Upload-Fortschritt)
+  async upload(path, file, onProgress) {
+    const url = `/storage/v1/object/media/${path.split('/').map(encodeURIComponent).join('/')}`;
+    const headers = { 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'false' };
+    if (!onProgress) {
+      await Auth.fetch(url, { method: 'POST', headers, body: file });
+      return 'file:' + path;
+    }
+    const token = await Auth.token();
+    await new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('POST', CFG.url + url);
+      Object.entries({ apikey: CFG.key, Authorization: `Bearer ${token}`, ...headers }).forEach(([k, v]) => x.setRequestHeader(k, v));
+      x.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+      x.onload = () => {
+        if (x.status >= 200 && x.status < 300) return resolve();
+        let d = {}; try { d = JSON.parse(x.responseText); } catch {}
+        reject(new AuthError(d.message || d.msg || d.error || `Fehler ${x.status}`, x.status, d.code));
+      };
+      x.onerror = () => reject(new Error('Keine Verbindung – Upload abgebrochen. Bitte nochmal versuchen.'));
+      x.send(file);
     });
     return 'file:' + path;
   },

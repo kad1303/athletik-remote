@@ -881,12 +881,13 @@ const Admin = {
     $$('input[name=aud]', f).forEach(r => r.onchange = () => { $('.aud-list', f).hidden = el.aud.value !== 'some'; });
     f.onsubmit = async e => {
       e.preventDefault();
-      e.target.querySelector("[type=submit]").disabled = true;
+      const btn = e.target.querySelector("[type=submit]");
+      btn.disabled = true;
       try {
         let url = el.url.value.trim() || (c.url && c.url.startsWith('file:') ? c.url : '');
         if (file) {
-          toast('Lädt hoch …');
-          url = await DB.upload(`videos/${uuid()}-${safeName(file.name)}`, file);
+          btn.textContent = 'Lädt hoch … 0 %';
+          url = await DB.upload(`videos/${uuid()}-${safeName(file.name)}`, file, p => { btn.textContent = p < 1 ? `Lädt hoch … ${Math.round(p * 100)} %` : 'Wird gespeichert …'; });
           if (c.url && c.url.startsWith('file:')) await DB.removeFile(c.url.slice(5));
         }
         const who = $$('input[name=who]:checked', f).map(x => x.value);
@@ -899,7 +900,7 @@ const Admin = {
         closeSheet();
         toast('Gespeichert');
         route();
-      } catch (x) { toast(friendlyAuthError(x), 'err'); e.target.querySelector("[type=submit]").disabled = false; }
+      } catch (x) { toast(friendlyAuthError(x), 'err'); btn.disabled = false; btn.textContent = 'Speichern'; }
     };
   },
 };
