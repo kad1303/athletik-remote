@@ -182,28 +182,67 @@ const Remote = {
     return t ? JSON.parse(t) : null;
   },
 
-  // onProgress(0…1): mit Fortschritt (über XMLHttpRequest, fetch kennt keinen Upload-Fortschritt)
+  // onProgress(0…1): Fortschritt melden. Große Dateien gehen in 6-MB-Stücken hoch (Supabase „resumable upload“ / TUS):
+  // reißt die Verbindung ab, wird nur das Stück wiederholt, nicht die ganze Datei.
   async upload(path, file, onProgress) {
-    const url = `/storage/v1/object/media/${path.split('/').map(encodeURIComponent).join('/')}`;
-    const headers = { 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'false' };
-    if (!onProgress) {
-      await Auth.fetch(url, { method: 'POST', headers, body: file });
+    const type = file.type || 'application/octet-stream';
+    if (!onProgress || file.size <= 6 * 1048576) {
+      await Auth.fetch(`/storage/v1/object/media/${path.split('/').map(encodeURIComponent).join('/')}`, {
+        method: 'POST', headers: { 'Content-Type': type, 'x-upsert': 'false' }, body: file,
+      });
+      if (onProgress) onProgress(1);
       return 'file:' + path;
     }
-    const token = await Auth.token();
-    await new Promise((resolve, reject) => {
+    const CHUNK = 6 * 1048576;   // von Supabase vorgegeben
+    const b64 = s => btoa(unescape(encodeURIComponent(s)));
+    const tus = { 'Tus-Resumable': '1.0.0' };
+    // Ein Schritt per XMLHttpRequest (nur der kennt Upload-Fortschritt); stockt er 45 s, wird abgebrochen
+    const send = (method, url, headers, body, onBytes) => new Promise(async (resolve, reject) => {
+      let token;
+      try { token = await Auth.token(); } catch (e) { return reject(e); }
       const x = new XMLHttpRequest();
-      x.open('POST', CFG.url + url);
-      Object.entries({ apikey: CFG.key, Authorization: `Bearer ${token}`, ...headers }).forEach(([k, v]) => x.setRequestHeader(k, v));
-      x.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+      x.open(method, url);
+      Object.entries({ apikey: CFG.key, Authorization: `Bearer ${token}`, ...tus, ...headers }).forEach(([k, v]) => x.setRequestHeader(k, v));
+      let idle;
+      const watch = () => { clearTimeout(idle); idle = setTimeout(() => x.abort(), 45000); };
+      x.upload.onprogress = e => { watch(); if (onBytes) onBytes(e.loaded); };
       x.onload = () => {
-        if (x.status >= 200 && x.status < 300) return resolve();
+        clearTimeout(idle);
+        if (x.status >= 200 && x.status < 300) return resolve(x);
         let d = {}; try { d = JSON.parse(x.responseText); } catch {}
         reject(new AuthError(d.message || d.msg || d.error || `Fehler ${x.status}`, x.status, d.code));
       };
-      x.onerror = () => reject(new Error('Keine Verbindung – Upload abgebrochen. Bitte nochmal versuchen.'));
-      x.send(file);
+      x.onerror = x.onabort = () => { clearTimeout(idle); reject(new Error('net')); };
+      watch();
+      x.send(body);
     });
+
+    const create = await send('POST', `${CFG.url}/storage/v1/upload/resumable`, {
+      'Upload-Length': String(file.size), 'x-upsert': 'false',
+      'Upload-Metadata': `bucketName ${b64('media')},objectName ${b64(path)},contentType ${b64(type)},cacheControl ${b64('3600')}`,
+    });
+    let loc = create.getResponseHeader('Location');
+    if (!loc) return this.upload(path, file);   // Stück-Upload nicht verfügbar → normal in einem Rutsch
+    if (loc.startsWith('/')) loc = CFG.url + loc;
+
+    let offset = 0, fails = 0;
+    onProgress(0);
+    while (offset < file.size) {
+      const end = Math.min(offset + CHUNK, file.size);
+      try {
+        const r = await send('PATCH', loc, { 'Upload-Offset': String(offset), 'Content-Type': 'application/offset+octet-stream' },
+          file.slice(offset, end), n => onProgress((offset + n) / file.size));
+        offset = Number(r.getResponseHeader('Upload-Offset')) || end;
+        fails = 0;
+      } catch (e) {
+        if (e instanceof AuthError && e.status !== 409 && e.status < 500) throw e;
+        if (++fails > 5) throw new Error('Keine stabile Verbindung – Upload abgebrochen. Bitte im WLAN nochmal versuchen.');
+        await new Promise(r => setTimeout(r, 1500 * fails));
+        // Beim Server nachfragen, wie viel schon angekommen ist, und dort weitermachen
+        try { const h = await send('HEAD', loc, {}); offset = Number(h.getResponseHeader('Upload-Offset')) || offset; } catch {}
+      }
+      onProgress(offset / file.size);
+    }
     return 'file:' + path;
   },
 
