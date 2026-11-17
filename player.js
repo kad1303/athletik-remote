@@ -332,7 +332,7 @@ const Player = {
       </div>
       <section class="card upload-card">
         <h2>Video an Alex schicken</h2>
-        <p class="muted small">Z. B. zur Technik-Kontrolle. Am besten kurz halten (max. ${MAX_UPLOAD_MB} MB).</p>
+        <p class="muted small">Z. B. zur Technik-Kontrolle. Große Videos verkleinert die App vorher automatisch – dafür bitte die App offen lassen, bis „angekommen“ erscheint.</p>
         <form class="form" id="my-up">
           <label>Kommentar<textarea name="title" rows="2"></textarea></label>
           <label class="btn block upload-btn">${icon('upload')} <span class="fname">Video auswählen</span><input type="file" name="file" accept="video/*" hidden></label>
@@ -363,19 +363,24 @@ const Player = {
     if (!f) return;
     const inp = f.elements.file, btn = f.querySelector('[type=submit]');
     inp.onchange = () => {
-      const file = inp.files[0];
-      if (file && file.size > MAX_UPLOAD_MB * 1048576) { toast(`Das Video ist größer als ${MAX_UPLOAD_MB} MB – bitte kürzer aufnehmen.`, 'err'); inp.value = ''; }
       $('.fname', f).textContent = inp.files[0] ? inp.files[0].name : 'Video auswählen';
       btn.disabled = !inp.files[0];
     };
     f.onsubmit = async e => {
       e.preventDefault();
-      const file = inp.files[0];
+      let file = inp.files[0];
       if (!file) return;
       btn.disabled = true;
-      btn.textContent = 'Wird hochgeladen …';
       try {
-        const url = await DB.upload(`spieler/${this.pid()}/${uuid()}-${safeName(file.name)}`, file);
+        // Große Handy-Videos (4K, lang) erst verkleinern: passt dann unter die Grenze und geht viel schneller hoch
+        if (file.size > SHRINK_FROM_MB * 1048576) {
+          btn.textContent = 'Video wird verkleinert … 0 %';
+          file = await shrinkVideo(file, p => { btn.textContent = `Video wird verkleinert … ${Math.round(p * 100)} %`; });
+        }
+        if (file.size > MAX_UPLOAD_MB * 1048576) throw new Error(`Das Video ist zu lang (über ${MAX_UPLOAD_MB} MB) – bitte kürzer aufnehmen oder in zwei Teilen schicken.`);
+        btn.textContent = 'Wird hochgeladen … 0 %';
+        const url = await DB.upload(`spieler/${this.pid()}/${uuid()}-${safeName(file.name)}`, file,
+          p => { btn.textContent = p < 1 ? `Wird hochgeladen … ${Math.round(p * 100)} %` : 'Wird gespeichert …'; });
         await DB.insert('player_videos', { player_id: this.pid(), title: f.elements.title.value.trim() || null, url });
         toast('Video ist bei Alex angekommen');
         f.reset();

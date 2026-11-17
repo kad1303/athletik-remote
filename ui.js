@@ -94,6 +94,76 @@ function fitSheet(bg) {
   vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply);
 }
 
+/* ---------- Video verkleinern (vor dem Hochladen) ----------
+   Spielt das Video unsichtbar ab und nimmt es in max. 720p mit niedrigerer Datenrate neu auf.
+   Dauert so lange wie das Video selbst. Liefert eine neue Datei – oder die alte, wenn's nicht geht / nichts bringt.
+   Zuerst aufrufen, bevor im Klick-Handler etwas abgewartet wird (sonst darf der Ton nicht mitlaufen). */
+async function shrinkVideo(file, onProgress, maxMB = 45) {
+  const types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
+  const mime = window.MediaRecorder && types.find(t => MediaRecorder.isTypeSupported(t));
+  const canvas = document.createElement('canvas');
+  if (!mime || !canvas.captureStream) return file;
+  let ac;
+  try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+  const src = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  Object.assign(v, { src, playsInline: true, preload: 'auto' });
+  v.setAttribute('playsinline', '');
+  v.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0';
+  document.body.appendChild(v);
+  try {
+    await new Promise((ok, fail) => { v.onloadedmetadata = ok; v.onerror = () => fail(new Error('Video lässt sich nicht lesen')); });
+    const dur = v.duration;
+    if (!dur || !isFinite(dur) || !v.videoWidth) return file;
+    const k = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+    canvas.width = Math.round(v.videoWidth * k / 2) * 2;
+    canvas.height = Math.round(v.videoHeight * k / 2) * 2;
+    const g = canvas.getContext('2d');
+    const stream = canvas.captureStream(30);
+    // Ton mitnehmen, wenn der Browser das erlaubt – sonst stumm
+    let withSound = false;
+    if (ac) {
+      try {
+        const dest = ac.createMediaStreamDestination();
+        ac.createMediaElementSource(v).connect(dest);
+        dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+        await ac.resume();
+        withSound = true;
+      } catch {}
+    }
+    v.muted = !withSound;
+    const bps = Math.min(2_000_000, Math.floor((maxMB * 1048576 * 8) / dur * 0.85));
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bps, audioBitsPerSecond: 64000 });
+    const parts = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
+    const done = new Promise(ok => { rec.onstop = ok; });
+    const draw = () => {
+      if (v.ended || rec.state !== 'recording') return;
+      g.drawImage(v, 0, 0, canvas.width, canvas.height);
+      if (onProgress) onProgress(Math.min(1, v.currentTime / dur));
+      v.requestVideoFrameCallback ? v.requestVideoFrameCallback(draw) : requestAnimationFrame(draw);
+    };
+    try { await v.play(); } catch {
+      if (!v.muted) { v.muted = true; await v.play(); } else throw new Error('Video lässt sich nicht abspielen');
+    }
+    rec.start(1000);
+    draw();
+    await new Promise(ok => { v.onended = ok; });
+    rec.stop();
+    await done;
+    const out = new Blob(parts, { type: mime.split(';')[0] });
+    if (!out.size || out.size >= file.size) return file;
+    const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+    return new File([out], file.name.replace(/\.[^.]+$/, '') + '-klein.' + ext, { type: out.type });
+  } catch (e) {
+    console.warn('Verkleinern nicht möglich', e);
+    return file;
+  } finally {
+    v.pause(); v.remove(); URL.revokeObjectURL(src);
+    if (ac) ac.close().catch(() => {});
+  }
+}
+
 function closeSheet() {
   const bg = $('.sheet-bg');
   if (!bg) return;

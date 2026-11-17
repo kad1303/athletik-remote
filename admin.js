@@ -6,6 +6,7 @@
    ============================================================ */
 
 const MAX_UPLOAD_MB = 50;   // Grenze im kostenlosen Supabase-Tarif
+const SHRINK_FROM_MB = 20;  // Spieler-Videos darüber werden vor dem Hochladen verkleinert
 
 const Admin = {
   route(page) {
@@ -875,7 +876,6 @@ const Admin = {
     let file = null;
     el.file.onchange = () => {
       file = el.file.files[0] || null;
-      if (file && file.size > MAX_UPLOAD_MB * 1048576) { toast(`Datei ist größer als ${MAX_UPLOAD_MB} MB – Videos bitte über YouTube (nicht gelistet) teilen.`, 'err'); file = null; el.file.value = ''; return; }
       if (file) { $('#fname', s).textContent = file.name; el.url.value = ''; if (!el.title.value) el.title.value = file.name.replace(/\.[^.]+$/, ''); }
     };
     $$('input[name=aud]', f).forEach(r => r.onchange = () => { $('.aud-list', f).hidden = el.aud.value !== 'some'; });
@@ -886,6 +886,12 @@ const Admin = {
       try {
         let url = el.url.value.trim() || (c.url && c.url.startsWith('file:') ? c.url : '');
         if (file) {
+          // Über der Grenze: erst verkleinern (dauert so lange wie das Video)
+          if (file.size > MAX_UPLOAD_MB * 1048576) {
+            btn.textContent = 'Video wird verkleinert … 0 %';
+            file = await shrinkVideo(file, p => { btn.textContent = `Video wird verkleinert … ${Math.round(p * 100)} %`; });
+            if (file.size > MAX_UPLOAD_MB * 1048576) throw new Error(`Das Video ist auch verkleinert noch über ${MAX_UPLOAD_MB} MB – bitte kürzen oder über YouTube (nicht gelistet) teilen.`);
+          }
           btn.textContent = 'Lädt hoch … 0 %';
           url = await DB.upload(`videos/${uuid()}-${safeName(file.name)}`, file, p => { btn.textContent = p < 1 ? `Lädt hoch … ${Math.round(p * 100)} %` : 'Wird gespeichert …'; });
           if (c.url && c.url.startsWith('file:')) await DB.removeFile(c.url.slice(5));

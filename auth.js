@@ -212,7 +212,7 @@ const Remote = {
         let d = {}; try { d = JSON.parse(x.responseText); } catch {}
         reject(new AuthError(d.message || d.msg || d.error || `Fehler ${x.status}`, x.status, d.code));
       };
-      x.onerror = x.onabort = () => { clearTimeout(idle); reject(new Error('net')); };
+      x.onerror = x.onabort = () => { clearTimeout(idle); reject(new Error('Keine Verbindung – bitte nochmal versuchen.')); };
       watch();
       x.send(body);
     });
