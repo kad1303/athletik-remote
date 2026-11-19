@@ -384,6 +384,7 @@ a.card.plan-box { background: var(--card); padding: 16px; }
 .pick-row { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card-2); cursor: pointer; text-align: left; }
 .pick-row span { display: grid; }
 .pick-row:disabled { opacity: 0.4; }
+a.pick-row { text-decoration: none; color: inherit; }
 .pick-row.danger { color: var(--bad); }
 .pick-row .ic { color: var(--accent); }
 .pick-row.danger .ic { color: var(--bad); }
